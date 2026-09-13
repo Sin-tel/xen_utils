@@ -13,6 +13,8 @@ pub enum Error {
 	NotInSubgroup(String),
 	/// A computed value did not fit in its integer type.
 	Overflow(String),
+	/// A valid request that this library cannot handle yet.
+	Unsupported(String),
 	/// An integer linear algebra operation failed.
 	Diophantine(diophantine::DiophantineError),
 }
@@ -24,6 +26,7 @@ impl fmt::Display for Error {
 			Error::InvalidSubgroup(msg) => write!(f, "invalid subgroup: {msg}"),
 			Error::NotInSubgroup(msg) => write!(f, "not in subgroup: {msg}"),
 			Error::Overflow(msg) => write!(f, "overflow: {msg}"),
+			Error::Unsupported(msg) => write!(f, "unsupported: {msg}"),
 			Error::Diophantine(e) => write!(f, "{e}"),
 		}
 	}

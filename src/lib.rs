@@ -11,10 +11,12 @@
 #![allow(clippy::needless_range_loop)]
 
 pub mod error;
+pub mod notation;
 pub mod primes;
 pub mod temperament;
 
 pub use diophantine::Matrix;
 pub use error::Error;
+pub use notation::Notation;
 pub use primes::{Subgroup, Weighting};
 pub use temperament::Temperament;
