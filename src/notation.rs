@@ -1,9 +1,11 @@
 //! Notation systems as linear maps.
 
-use diophantine::{Matrix, integer_det, integer_inverse, solve_diophantine, transpose};
+use diophantine::{
+	Matrix, cvp_exact, eye, integer_inverse, kernel_right, lll, solve_diophantine, transpose,
+};
 
 use crate::Error;
-use crate::primes::Subgroup;
+use crate::primes::{Subgroup, Weighting};
 use crate::temperament::Temperament;
 
 /// The nominals, in order of the fifth chain. `F` is one fifth below `C`, so
@@ -105,219 +107,219 @@ impl Notation {
 	/// the choice is left open. Enabling an accidental splits apart spellings
 	/// the one before it wrote alike, at the cost of another symbol to read.
 	///
-	/// An equal temperament offers the whole run between those two: 41et can
-	/// be written on the fifth chain alone, or with one accidental worth a
-	/// step, or with that and a second accidental for 11. Other temperaments
-	/// currently offer only the two ends.
+	/// Each accidental falls into one of three classes. One the temperament
+	/// tempers out would raise by nothing and is always dropped. Of the rest,
+	/// the smallest set that makes the notation span the subgroup at all is
+	/// *necessary* and is always kept; the remainder are *optional*, and the
+	/// run enables them one at a time in order of prime.
+	///
+	/// The first notation therefore has the rank of the temperament wherever one
+	/// of that rank exists, and the last keeps an accidental for every prime the
+	/// temperament does not spell on the fifth chain already.
 	///
 	/// # Errors
-	/// Returns [`Error::Unsupported`] if no notation can be derived, which
-	/// happens for an equal temperament whose fifth chain does not reach every
-	/// note and that has no accidental worth a single step.
+	/// Returns [`Error::Unsupported`] if some prime has no accidental, or if a
+	/// notation in the run needs more accidentals than there are symbols.
 	pub fn options(temperament: &Temperament) -> Result<Vec<Self>, Error> {
 		let subgroup = temperament.subgroup();
-		let accidentals = (2..subgroup.dim())
+		let accidentals: Matrix<i64> = (2..subgroup.dim())
 			.map(|index| accidental(subgroup, index))
-			.collect::<Result<Matrix<i64>, Error>>()?;
+			.collect::<Result<_, Error>>()?;
 
-		if temperament.rank() == 1 {
-			let (necessary, optional) =
-				Notation::equal_temperament_layers(temperament, &accidentals)?;
-			return (0..=optional.len())
-				.map(|extras| {
-					let keep: Vec<usize> = necessary
-						.iter()
-						.chain(&optional[..extras])
-						.copied()
-						.collect();
-					Notation::from_equal_temperament(temperament, &accidentals, &keep)
-				})
-				.collect();
-		}
+		let images: Matrix<i64> = accidentals
+			.iter()
+			.map(|a| temperament.map(a))
+			.collect::<Result<_, Error>>()?;
+		// An accidental the temperament tempers out raises by nothing, so it is
+		// never worth keeping.
+		let useful: Vec<usize> = (0..accidentals.len())
+			.filter(|&index| images[index].iter().any(|&step| step != 0))
+			.collect();
 
-		// Keeping every accidental the temperament does not temper out, one it
-		// tempers out being an accidental that raises by nothing.
-		let (kept, commas) = accidentals.clone().into_iter().partition(|a| {
-			temperament
-				.map(a)
-				.is_ok_and(|steps| steps.iter().any(|&s| s != 0))
-		});
-		let full = Notation::assemble(subgroup, kept, commas)?;
+		let necessary = Notation::necessary(temperament, &accidentals, &useful)?;
+		let dropped: Vec<usize> = (0..accidentals.len())
+			.filter(|index| !necessary.contains(index))
+			.collect();
+		let optional: Vec<usize> = dropped
+			.iter()
+			.copied()
+			.filter(|index| useful.contains(index))
+			.collect();
 
-		// The smallest notation, where there is a smaller one at all. Comparing
-		// mappings rather than whole notations, since the two are built from
-		// different bases of the same kernel and only the map matters.
-		match Notation::minimal(temperament, &accidentals) {
-			Ok(minimal) if minimal.mapping != full.mapping => Ok(vec![minimal, full]),
-			_ => Ok(vec![full]),
-		}
+		// One comma per accidental that may be dropped, fixed once and for all
+		// so that enabling an accidental only ever removes a comma. A smaller
+		// notation's kernel therefore always contains a larger one's.
+		let commas: Matrix<i64> = dropped
+			.iter()
+			.map(|&index| Notation::comma(temperament, &accidentals, &necessary, &useful, index))
+			.collect::<Result<_, Error>>()?;
+
+		(0..=optional.len())
+			.map(|extras| {
+				let keep: Vec<usize> = necessary
+					.iter()
+					.chain(&optional[..extras])
+					.copied()
+					.collect();
+				let kept = (0..accidentals.len())
+					.filter(|index| keep.contains(index))
+					.map(|index| accidentals[index].clone())
+					.collect();
+				let commas = dropped
+					.iter()
+					.zip(&commas)
+					.filter(|(index, _)| !keep.contains(index))
+					.map(|(_, comma)| comma.clone())
+					.collect();
+				Notation::assemble(subgroup, kept, commas)
+			})
+			.collect()
 	}
 
-	/// Builds the notation of `temperament` that has no enharmonics: its
-	/// kernel is the whole comma lattice, so it has the same rank as the
-	/// temperament and spelling is a bijection.
+	/// Which accidentals every notation of `temperament` must keep, as indices
+	/// into `accidentals`: the smallest subset of the `useful` ones that makes
+	/// a notation possible at all, preferring the lower primes.
 	///
-	/// The octave and the fifth are always generators, so such a notation
-	/// keeps exactly `rank - 2` accidentals, and which ones is a real choice.
-	/// A set works when the generators and the commas together still span the
-	/// subgroup, i.e. when the square matrix of the two is unimodular, which
-	/// is the same as saying the chosen generators generate the temperament.
-	/// Sets keeping the accidentals of the lower primes are tried first.
-	fn minimal(temperament: &Temperament, accidentals: &Matrix<i64>) -> Result<Self, Error> {
-		let subgroup = temperament.subgroup();
+	/// The octave, the fifth and the kept accidentals have to generate the
+	/// temperament, since otherwise some interval the temperament distinguishes
+	/// has no spelling. Taking `keep` of them works exactly when their images
+	/// generate the whole of the tempered lattice.
+	///
+	/// A notation of the same rank as the temperament keeps `rank - 2` of them,
+	/// so that is the smallest this can come to; where no such subset spans,
+	/// the notation is forced to be larger. Keeping every useful accidental
+	/// always spans, so the search always finds something.
+	fn necessary(
+		temperament: &Temperament,
+		accidentals: &Matrix<i64>,
+		useful: &[usize],
+	) -> Result<Vec<usize>, Error> {
 		let rank = temperament.rank();
-		let keep = rank
-			.checked_sub(2)
-			.filter(|&keep| keep <= accidentals.len());
-		let keep = keep.ok_or_else(|| {
-			Error::Unsupported(format!(
-				"a rank {rank} notation over {subgroup} cannot be built from the octave, \
-				 the fifth and {} accidentals",
-				accidentals.len()
-			))
-		})?;
-		// The reduced basis, so that the commas come out small and ascending
-		// like the accidentals do. Any basis of the same lattice would give the
-		// same notation.
-		let commas = temperament.reduced_comma_basis()?;
+		let identity: Matrix<i64> = eye(rank);
 
-		// Subsets of the accidentals, smallest indices first, so that the
-		// accidentals of the lower primes are the ones kept where there is a
-		// choice.
-		for mask in 0u32..(1 << accidentals.len()) {
-			if mask.count_ones() as usize != keep {
-				continue;
-			}
-			let kept: Matrix<i64> = accidentals
-				.iter()
-				.enumerate()
-				.filter(|(index, _)| mask & (1 << index) != 0)
-				.map(|(_, a)| a.clone())
-				.collect();
-
-			let mut square = fifth_chain(subgroup.dim());
-			square.extend(kept.iter().chain(&commas).cloned());
-			if integer_det(&square)?.abs() == 1 {
-				return Notation::assemble(subgroup, kept, commas);
+		for keep in 0..=useful.len() {
+			// Subsets of `keep` indices, in lexicographic order, so that the
+			// accidentals of the lower primes are the ones kept where there is
+			// a choice.
+			for subset in subsets(useful, keep) {
+				let mut generators = fifth_chain(temperament.dim());
+				generators.extend(subset.iter().map(|&index| accidentals[index].clone()));
+				let images: Matrix<i64> = generators
+					.iter()
+					.map(|g| temperament.map(g))
+					.collect::<Result<_, Error>>()?;
+				if solve_diophantine(&transpose(&images), &identity).is_ok() {
+					return Ok(subset);
+				}
 			}
 		}
 
 		Err(Error::Unsupported(format!(
-			"no {keep} of the accidentals of {subgroup} generate this rank {rank} temperament"
+			"the octave, the fifth and the accidentals of {} do not generate this rank {rank} \
+			 temperament",
+			temperament.subgroup()
 		)))
 	}
 
-	/// Which accidentals the notation of an equal temperament must have, and
-	/// which it may take on, as indices into the prime accidentals.
+	/// The notational comma of the accidental at `index`: the difference
+	/// between it and the replacement a notation without it must use.
 	///
-	/// An equal temperament is rank 1, so it has no notation of its own rank:
-	/// the octave and the fifth alone already make two. Two questions settle
-	/// what it does have. Does the fifth chain reach every note by itself, so
-	/// that nothing else is needed? And is any accidental worth a single step,
-	/// which is the one to reach for first, since an equal temperament notated
-	/// with one accidental wants that accidental to be the step?
+	/// The replacement is built from the octave, the fifth, the necessary
+	/// accidentals and the accidentals of the lower primes - the ones still
+	/// available once the higher ones have been dropped in turn - and has to be
+	/// worth what the accidental is worth, so that the two are the same pitch.
+	/// An accidental the temperament tempers out is replaced by nothing at all,
+	/// since the temperament already calls it a unison.
 	///
-	/// Accidentals worth no steps are tempered out and would raise by nothing.
-	/// Ones worth a single step are the step over again - 41et has `81/80` and
-	/// `64/63` both worth one, and either serves. What is left, worth more than
-	/// one step each, are the further accidentals worth having.
+	/// Which replacement is usually still a choice, settled in two steps.
 	///
-	/// # Errors
-	/// Returns [`Error::Unsupported`] if the fifth chain does not reach every
-	/// note and no accidental is worth a step, so that there is nothing to
-	/// build a notation from.
-	fn equal_temperament_layers(
+	/// A plain stack of the accidentals still available keeps the nominal and
+	/// the sharps that just intonation gives the prime and changes only the
+	/// number of accidentals, so where there is such a stack it is the one
+	/// wanted. This is what writes `33/32` as two syntonic commas in 41et and
+	/// as one septimal comma in 31et.
+	///
+	/// Failing that the fifth chain has to be walked, and how far is a choice
+	/// again. The replacements that work differ by the commas the notation could
+	/// temper out, so they form a coset of that lattice, and the one whose comma
+	/// is simplest under [`Weighting`] is taken. Preferring a short walk instead
+	/// would run the accidentals away: 51et writes `64/63` as a stack of 25
+	/// syntonic commas rather than take five fifths.
+	fn comma(
 		temperament: &Temperament,
 		accidentals: &Matrix<i64>,
-	) -> Result<(Vec<usize>, Vec<usize>), Error> {
-		let subgroup = temperament.subgroup();
-		let chain = fifth_chain(subgroup.dim());
-		let divisions = temperament.map(&chain[0])?[0];
-		let fifth = temperament.map(&chain[1])?[0];
-		if divisions <= 0 {
-			return Err(Error::Unsupported(
-				"an equal temperament must divide the octave into a positive number of steps"
-					.into(),
-			));
+		necessary: &[usize],
+		useful: &[usize],
+		index: usize,
+	) -> Result<Vec<i64>, Error> {
+		// The temperament already spells this accidental as a unison.
+		if !useful.contains(&index) {
+			return Ok(accidentals[index].clone());
 		}
 
-		// The fifth chain comes back round only after every note exactly when
-		// its step count shares no factor with the number of divisions.
-		let reaches_everything = gcd(divisions, fifth) == 1;
-
-		let steps = accidentals
+		// The accidentals still available, lowest prime first. One the
+		// temperament tempers out raises by nothing, so it is no use here.
+		let stack: Matrix<i64> = useful
 			.iter()
-			.map(|a| Ok(temperament.map(a)?[0]))
-			.collect::<Result<Vec<i64>, Error>>()?;
-		let Some(step) = steps.iter().position(|s| s.abs() == 1) else {
-			if reaches_everything {
-				return Ok((Vec::new(), Vec::new()));
-			}
-			return Err(Error::Unsupported(format!(
-				"the fifth chain of this equal temperament does not reach every note, \
-				 and no accidental of {subgroup} is worth one step of it"
-			)));
-		};
+			.copied()
+			.filter(|&other| other != index && (other < index || necessary.contains(&other)))
+			.map(|other| accidentals[other].clone())
+			.collect();
+		let target = temperament.map(&accidentals[index])?;
 
-		let further = (0..accidentals.len()).filter(|&i| steps[i].abs() > 1);
-		if reaches_everything {
-			// The step is worth having but can be done without.
-			Ok((Vec::new(), std::iter::once(step).chain(further).collect()))
-		} else {
-			Ok((vec![step], further.collect()))
+		let images = Notation::images(temperament, &stack)?;
+		if let Some(counts) = preferred_solution(&target, &images)? {
+			return Ok(difference(&accidentals[index], &counts, &stack));
 		}
+
+		// The same generators with the octave and the fifth added.
+		let mut every = stack;
+		every.extend(fifth_chain(temperament.dim()));
+		let images = Notation::images(temperament, &every)?;
+		let columns = transpose(&images);
+
+		let wanted: Matrix<i64> = target.iter().map(|&step| vec![step]).collect();
+		let counts = solve_diophantine(&columns, &wanted).map_err(|_| {
+			Error::Unsupported(format!(
+				"the accidental {:?} of {} cannot be replaced, though it was not kept",
+				accidentals[index],
+				temperament.subgroup()
+			))
+		})?;
+		let rough = difference(
+			&accidentals[index],
+			&counts.iter().map(|row| row[0]).collect::<Vec<i64>>(),
+			&every,
+		);
+
+		let freedom = kernel_right(&columns)?;
+		if freedom.is_empty() || freedom[0].is_empty() {
+			return Ok(rough);
+		}
+		let zero = vec![0i64; temperament.dim()];
+		let lattice: Matrix<i64> = transpose(&freedom)
+			.iter()
+			.map(|counts| {
+				difference(&zero, counts, &every)
+					.iter()
+					.map(|x| -x)
+					.collect()
+			})
+			.collect();
+
+		let weights = temperament.subgroup().weights(Weighting::default());
+		let reduced = lll(&lattice, 0.99, &weights)?;
+		let closest = cvp_exact(&rough, &reduced, &weights)?;
+		Ok(rough
+			.iter()
+			.zip(&closest)
+			.map(|(value, near)| value - near)
+			.collect())
 	}
 
-	/// Builds the notation of an equal temperament keeping the accidentals at
-	/// `keep`, the first of which must be the one worth a single step.
-	///
-	/// Every dropped accidental is worth some whole number of steps, so it
-	/// becomes that many of the step accidental; the difference is the comma.
-	/// With no accidental at all, nothing is left but the fifth chain, and a
-	/// dropped accidental becomes the interval on the chain nearest a unison
-	/// that the temperament cannot tell it from.
-	fn from_equal_temperament(
-		temperament: &Temperament,
-		accidentals: &Matrix<i64>,
-		keep: &[usize],
-	) -> Result<Self, Error> {
-		let subgroup = temperament.subgroup();
-		let chain = fifth_chain(subgroup.dim());
-		let divisions = temperament.map(&chain[0])?[0];
-		let fifth = temperament.map(&chain[1])?[0];
-
-		let step = match keep.first() {
-			Some(&index) => Some((
-				&accidentals[index],
-				temperament.map(&accidentals[index])?[0],
-			)),
-			None => None,
-		};
-
-		let mut commas = Matrix::new();
-		for (index, a) in accidentals.iter().enumerate() {
-			if keep.contains(&index) {
-				continue;
-			}
-			let worth = temperament.map(a)?[0];
-			let replacement = match step {
-				// The step is worth one, so `a` is worth `worth` of it.
-				Some((vector, sign)) => {
-					let multiple = worth * sign;
-					vector.iter().map(|x| multiple * x).collect()
-				}
-				None => nearest_on_chain(worth, divisions, fifth, &chain)?,
-			};
-			commas.push(
-				a.iter()
-					.zip(&replacement)
-					.map(|(x, y)| x - y)
-					.collect::<Vec<i64>>(),
-			);
-		}
-
-		let kept = keep.iter().map(|&i| accidentals[i].clone()).collect();
-		Notation::assemble(subgroup, kept, commas)
+	/// The images of `generators` under `temperament`.
+	fn images(temperament: &Temperament, generators: &Matrix<i64>) -> Result<Matrix<i64>, Error> {
+		generators.iter().map(|g| temperament.map(g)).collect()
 	}
 
 	/// Builds the notation with the given accidentals and commas, deriving the
@@ -462,29 +464,89 @@ fn gcd(a: i64, b: i64) -> i64 {
 	a
 }
 
-/// The interval on the fifth chain nearest a unison that an equal temperament
-/// of `divisions` steps, whose fifth is `fifth` steps, makes worth `worth`
-/// steps.
-///
-/// The fifth count is fixed only up to the whole circle of fifths, which comes
-/// to a whole number of octaves, so it is taken nearest to none.
-fn nearest_on_chain(
-	worth: i64,
-	divisions: i64,
-	fifth: i64,
-	chain: &Matrix<i64>,
-) -> Result<Vec<i64>, Error> {
-	let solution = solve_diophantine(&vec![vec![divisions, fifth]], &vec![vec![worth]])?;
-	let mut fifths = solution[1][0].rem_euclid(divisions);
-	if 2 * fifths > divisions {
-		fifths -= divisions;
+/// `interval` less the combination of `generators` given by `counts`.
+fn difference(interval: &[i64], counts: &[i64], generators: &Matrix<i64>) -> Vec<i64> {
+	(0..interval.len())
+		.map(|prime| {
+			interval[prime]
+				- counts
+					.iter()
+					.zip(generators)
+					.map(|(count, g)| count * g[prime])
+					.sum::<i64>()
+		})
+		.collect()
+}
+
+/// The subsets of `items` of size `size`, in lexicographic order.
+fn subsets(items: &[usize], size: usize) -> Vec<Vec<usize>> {
+	if size == 0 {
+		return vec![Vec::new()];
 	}
-	let octaves = (worth - fifth * fifths) / divisions;
-	Ok(chain[0]
+	let mut result = Vec::new();
+	for (position, &item) in items.iter().enumerate() {
+		for mut rest in subsets(&items[position + 1..], size - 1) {
+			let mut subset = vec![item];
+			subset.append(&mut rest);
+			result.push(subset);
+		}
+	}
+	result
+}
+
+/// Writes `target` as an integer combination of `generators`, given in order of
+/// preference, most preferred first. `None` if it cannot be written as one at
+/// all.
+///
+/// A combination is usually not unique, and the preference order picks one out.
+/// The last generator is used only if `target` cannot be reached without it,
+/// and then by as little as possible; then the one before it, and so on. Where
+/// the amount is not pinned down either, the counts that work form an
+/// arithmetic progression, and the one nearest none is taken.
+fn preferred_solution(target: &[i64], generators: &Matrix<i64>) -> Result<Option<Vec<i64>>, Error> {
+	let Some((last, rest)) = generators.split_last() else {
+		return Ok(target.iter().all(|&x| x == 0).then(Vec::new));
+	};
+	let rest = rest.to_vec();
+
+	// Reaching the target without the least preferred generator at all.
+	if let Some(mut counts) = preferred_solution(target, &rest)? {
+		counts.push(0);
+		return Ok(Some(counts));
+	}
+
+	let columns = transpose(generators);
+	let wanted: Matrix<i64> = target.iter().map(|&x| vec![x]).collect();
+	let Ok(solution) = solve_diophantine(&columns, &wanted) else {
+		return Ok(None);
+	};
+
+	// The counts of the last generator that work differ by whatever multiple of
+	// it the others can make up for, so they run in steps of `period`.
+	let kernel = diophantine::kernel_right(&columns)?;
+	let period = if kernel.len() == generators.len() {
+		kernel[generators.len() - 1].iter().copied().fold(0, gcd)
+	} else {
+		0
+	};
+
+	let mut count = solution[generators.len() - 1][0];
+	if period != 0 {
+		count = count.rem_euclid(period);
+		if 2 * count > period {
+			count -= period;
+		}
+	}
+
+	let reduced: Vec<i64> = target
 		.iter()
-		.zip(&chain[1])
-		.map(|(o, f)| octaves * o + fifths * f)
-		.collect())
+		.zip(last)
+		.map(|(&t, &l)| t - count * l)
+		.collect();
+	let mut counts =
+		preferred_solution(&reduced, &rest)?.expect("the remainder is reachable by construction");
+	counts.push(count);
+	Ok(Some(counts))
 }
 
 /// The octave `2/1` and the fifth `3/2` as interval vectors over a subgroup of
@@ -552,13 +614,6 @@ mod tests {
 			.collect();
 		let temperament = Temperament::from_commas(&commas, &subgroup).unwrap();
 		Notation::from_temperament(&temperament, minimal).unwrap()
-	}
-
-	/// The notation of the equal temperament of `divisions` over `subgroup`.
-	fn et_notation(divisions: i64, subgroup: &str, minimal: bool) -> Result<Notation, Error> {
-		let subgroup: Subgroup = subgroup.parse().unwrap();
-		let temperament = Temperament::et(divisions, &subgroup).unwrap();
-		Notation::from_temperament(&temperament, minimal)
 	}
 
 	/// Every notation the equal temperament of `divisions` over `subgroup`
@@ -854,17 +909,19 @@ mod tests {
 
 	#[test]
 	fn equal_temperament_stacks_further_accidentals_on_the_step() {
-		// 41et: the fifth chain, then one accidental worth a step, then a
-		// second for 11. The 11 is worth two steps, so with only the step it is
-		// written as two of them. 64/63 is worth a step as well, so it is the
-		// step over again and is never offered as a second accidental.
+		// 41et: the fifth chain, then one accidental worth a step, then 64/63,
+		// which is worth a step as well, then 33/32, which is worth two and so
+		// is written as two of the first while it is dropped.
 		let options = et_options(41, "2.3.5.7.11");
-		assert_eq!(ranks(&options), vec![2, 3, 4]);
+		assert_eq!(ranks(&options), vec![2, 3, 4, 5]);
 		assert_eq!(accidental_ratios(&options[1]), vec![(81, 80)]);
 		assert_eq!(note_of(&options[1], 7, 4), "vBb5");
 		assert_eq!(note_of(&options[1], 11, 8), "^^F5");
-		assert_eq!(accidental_ratios(&options[2]), vec![(81, 80), (33, 32)]);
-		assert_eq!(note_of(&options[2], 11, 8), ">F5");
+		assert_eq!(
+			accidental_ratios(&options[3]),
+			vec![(81, 80), (64, 63), (33, 32)]
+		);
+		assert_eq!(note_of(&options[3], 11, 8), "+F5");
 
 		// 72et needs its step, since its fifth chain closes early, and has two
 		// further accidentals on top: 64/63 is worth two steps and 33/32 three.
@@ -882,16 +939,16 @@ mod tests {
 	#[test]
 	fn equal_temperament_with_nothing_to_offer() {
 		// A meantone equal temperament tempers out the accidental for 5, so
-		// nothing is worth a single step. Its fifth chain reaches every note,
-		// so the fifth chain alone is all it gets - and all it needs, the
-		// enharmonics of 12et being the point of it.
+		// nothing is left to offer. Its fifth chain reaches every note, so the
+		// fifth chain alone is all it gets - and all it needs, the enharmonics
+		// of 12et being the point of it.
 		for divisions in [5, 7, 12, 19] {
 			let options = et_options(divisions, "2.3.5");
 			assert_eq!(ranks(&options), vec![2]);
 			assert_eq!(note_of(&options[0], 5, 4), "E5");
 		}
 
-		// 15et and 34et need their step and have nothing beyond it.
+		// 15et and 34et need their accidental and have nothing beyond it.
 		for divisions in [15, 34] {
 			let options = et_options(divisions, "2.3.5");
 			assert_eq!(ranks(&options), vec![3]);
@@ -901,17 +958,21 @@ mod tests {
 	}
 
 	#[test]
-	fn equal_temperament_with_no_notation_at_all() {
-		// The fifth chain of 25et closes after five notes and its syntonic
-		// comma is worth two steps, so there is nothing to build a notation
-		// from: its step is not an interval of the usual kind.
+	fn equal_temperament_whose_accidental_is_worth_more_than_a_step() {
+		// The fifth chain of 25et closes after five notes, so it needs an
+		// accidental, and its syntonic comma is worth two steps rather than
+		// one. Two steps is still enough to reach what the chain misses, since
+		// two and the fifteen of the fifth share no factor with 25.
 		for divisions in [25, 51, 54] {
-			assert!(et_notation(divisions, "2.3.5", true).is_err());
+			let options = et_options(divisions, "2.3.5");
+			assert_eq!(ranks(&options), vec![3]);
+			assert_eq!(accidental_ratios(&options[0]), vec![(81, 80)]);
+			assert_eq!(note_of(&options[0], 5, 4), "vE5");
 		}
 	}
 
 	#[test]
-	fn minimal_falls_back_when_the_fifth_chain_does_not_reach() {
+	fn no_rank_two_notation_when_the_fifth_chain_does_not_reach() {
 		// Blackwood's fifth chain closes after five notes, and porcupine
 		// reaches 5 only through its own comma. Neither has a rank 2 notation,
 		// so neither has anything smaller than the one it started with.
@@ -923,19 +984,67 @@ mod tests {
 	}
 
 	#[test]
+	fn rank_two_temperaments_offer_the_whole_run() {
+		// Huygens keeps the meantone spelling of 5, so its accidental for 5 is
+		// tempered out and only 7 and 11 are left to offer. All three notations
+		// spell 5 and 7 the same way; the 11 is what each of them adds.
+		let options = options_of("2.3.5.7.11", &[(81, 80), (126, 125), (99, 98)]);
+		assert_eq!(ranks(&options), vec![2, 3, 4]);
+		assert_eq!(accidental_ratios(&options[1]), vec![(64, 63)]);
+		assert_eq!(accidental_ratios(&options[2]), vec![(64, 63), (33, 32)]);
+		for n in &options {
+			assert_eq!(note_of(n, 5, 4), "E5");
+		}
+		assert_eq!(note_of(&options[0], 7, 4), "A#5");
+		assert_eq!(note_of(&options[1], 7, 4), "vBb5");
+		assert_eq!(note_of(&options[2], 11, 8), ">F5");
+	}
+
+	#[test]
+	fn kernels_nest_along_the_run() {
+		// Every comma of a larger notation is a comma of every smaller one, so
+		// a larger notation's spelling can always be simplified onto a smaller
+		// one's. This is what fixing one comma per accidental buys.
+		for (subgroup, commas) in [
+			("2.3.5.7.11", &[(81, 80), (126, 125), (99, 98)][..]),
+			("2.3.5.7.11", &[(225, 224), (385, 384)][..]),
+			("2.3.5.7", &[(225, 224)][..]),
+		] {
+			let options = options_of(subgroup, commas);
+			for pair in options.windows(2) {
+				for comma in pair[1].commas() {
+					assert_eq!(pair[0].to_interval(comma).unwrap(), vec![0; pair[0].rank()]);
+				}
+			}
+		}
+	}
+
+	#[test]
+	fn a_dropped_accidental_becomes_a_stack_of_the_lower_ones() {
+		// 11-limit marvel keeps an accidental for 5 and may drop the other two.
+		// 64/63 needs the fifth chain, but 33/32 is worth exactly what the two
+		// below it are worth together, so it becomes one of each.
+		let options = options_of("2.3.5.7.11", &[(225, 224), (385, 384)]);
+		assert_eq!(ranks(&options), vec![3, 4, 5]);
+		assert_eq!(note_of(&options[1], 11, 8), "^>F5");
+		// Dropping 64/63 too substitutes its own spelling into that one.
+		assert_eq!(note_of(&options[0], 11, 8), "^^^Gbb5");
+	}
+
+	#[test]
 	fn the_two_settings_are_the_ends_of_the_run() {
-		// 41et has three notations; the flag picks the outer two.
+		// 41et has four notations; the flag picks the outer two.
 		let subgroup: Subgroup = "2.3.5.7.11".parse().unwrap();
 		let temperament = Temperament::et(41, &subgroup).unwrap();
 		let options = Notation::options(&temperament).unwrap();
-		assert_eq!(options.len(), 3);
+		assert_eq!(options.len(), 4);
 		assert_eq!(
 			Notation::from_temperament(&temperament, true).unwrap(),
 			options[0]
 		);
 		assert_eq!(
 			Notation::from_temperament(&temperament, false).unwrap(),
-			options[2]
+			*options.last().unwrap()
 		);
 	}
 
