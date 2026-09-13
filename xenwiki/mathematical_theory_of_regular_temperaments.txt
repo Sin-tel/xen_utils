@@ -1,0 +1,96 @@
+{{interwiki
+| de = Verallgemeinerte reguläre Temperatur
+| en = Mathematical theory of regular temperaments
+| es = 
+| ja = レギュラーテンペラメントとランクrテンペラメント
+}}
+{{Expert|Regular temperament}}
+
+A '''regular temperament''' is a homomorphism that maps an abelian group of target/just intervals to another abelian group of [[tempering out|tempered]] intervals. In other words, it is a function from a group of (usually just) intervals to another simpler group of intervals that preserves the operation of [[stacking]]. Typically, the source set is assumed to be a multiplicative subgroup of the rational numbers (aka [[just intonation]]). Musically, tempering is done by deliberately mistuning some of the ratios such that a [[comma]] or set of commas vanishes by becoming a unison (it is ''tempered out'' in the temperament). The utility of regular temperament is partly to produce scales that are simpler and have more consonances than strict JI, while maintaining a high level of concordance (or similarity to JI), and partly to introduce useful "puns" as commas are tempered out. Temperaments effectively reduce the dimensionality of JI, thereby simplifying the pitch relationships.
+
+In mathematical terms, it is a function whose domain is a target tuning we wish to approximate, and its range is the intervals of the temperament. In general, this mapping is many-to-one, and two different rational numbers may be mapped to the same [[mapped interval|tempered interval]] — in this case we say that the two JI intervals are ''tempered together''.
+
+For instance, the pitch relationships in 7-limit JI can be thought of as 4-dimensional, with each prime up to 7 (2, 3, 5, and 7) representing an axis, and all intervals located by four-dimensional coordinates. In a 7-limit regular temperament, however, the dimensionality is reduced in some way, depending on which and how many commas are tempered out. In this way, intervals can be located with a set of one-, two-, or three-dimensional coordinates depending on the number of commas that have been tempered out. The dimensionality is the rank of the temperament.
+
+To use a concrete example, if [[Meantone family #Septimal meantone|7-limit meantone temperament]] is a function M, then {{nowrap|M(6/5) {{=}} M(32/27)}} {{nowrap|{{=}} "minor third"}}. The difference between these, 81/80 ([[syntonic comma]]), is tempered out in meantone temperament: {{nowrap|M(81/80) {{=}} M(1/1)}} {{nowrap|{{=}} "unison"}}.
+
+A regular temperament is abstract, and has no preferred exact tuning. There are ways to compute an optimal tuning for any given temperament, but there are multiple definitions of optimality that disagree with each other, so in general we can consider a regular temperament as having a [[Tuning ranges of regular temperaments|range of possible tunings of the generators]]. Once a tuning of each generator is provided the tuning of any interval can be computed as an integer linear combination of generator tunings. This property that all intervals are linear combinations of the generators is in fact what makes a temperament ''regular''.
+
+== Dimensionality, or rank ==
+A rank ''r'' regular temperament in a particular tuning may be defined by giving ''r'' multiplicatively independent real numbers, which can be multiplied together to produce the intervals attainable in the temperament. A rank ''r'' temperament will be defined by ''r'' generators, and thus ''r'' [[vals]]. An [[abstract regular temperament]] can be defined in various ways, for instance by giving a set of commas tempered out by the temperament, or a set of ''r'' independent vals defining the mapping of the temperament. A characteristic feature of any temperament tempering out a comma are the [[Comma pump examples|comma pumps]] of the comma, which are sequences of harmonically related notes or chords which return to their starting point when tempered, but which would not do so in just intonation. An example is the pump {{nowrap|{{dash|I, vii, IV, ii, V, I}}}} of meantone temperament.
+
+=== Rank-1 (equal) temperaments ===
+[[Equal-step tuning|Equal temperaments]] (abbreviated ET or tET) and [[EDO|equal divisions of the octave]] (abbreviated edo or ed2) are similar concepts, although there are distinctions in the way these terms are used. A ''p''-limit ET is simply a ''p''-limit temperament that uses a single generator, making it a rank-1 temperament, which thus maps the set of ''n''-limit JI intervals using one-dimensional coordinates. An ET thus does not have to be thought of as an equal division of any interval, let alone the octave, and in fact many ETs do not divide the pure octave at all. On the other hand, an ''n''-edo is a division of the octave into ''n'' equal parts, with no consideration given to mapping of JI intervals. An edo can be treated as an ET by applying a temperament mapping to the intervals of the edo, typically by using a val for a temperament supported by that edo, although one can also use unsupported vals or poorly-supported vals to achieve fun results. The familiar 12-note equal temperament, or 12edo, reduces the size of the perfect fifth (about 701.955{{cent}}) by 1/12 of the Pythagorean comma, resulting in a fifth of 700.0{{c}}, although there are other temperaments supported by 12et.
+
+=== Rank-2 (including linear) temperaments ===
+A ''p''-limit rank-2 temperament maps all intervals of ''p''-limit JI using a set of 2-dimensional coordinates, thus a rank-2 temperament is said to have two generators, though it may have any number of step-sizes. This means that a rank-2 temperament is defined by a period-generator mapping, a set of 2 vals, one val for each generator. The larger generator is called the period, as the temperament will repeat at that interval, and is often a fraction of an octave; if it is exactly an octave, the temperament is said to be a '''linear temperament'''. Rank-2 temperaments can be reduced to a related rank-1 temperament by tempering out an additional comma. For example, 5-limit meantone temperament, which is rank-2 (defined by tempering the syntonic comma of 81/80 out of 3-dimensional 5-limit JI), can be reduced to 12et by tempering out the Pythagorean comma.
+
+Regular temperaments of ranks two and three are cataloged on the [[Optimal patent val]] page. Rank-2 temperaments are also listed at [[Proposed names for rank 2 temperaments]] by their generator mappings, and at [[Map of rank-2 temperaments]] by their generator size. See also the [[pergen]]s page. There is also [[Graham Breed]]'s [http://x31eq.com/catalog2.html giant list of regular temperaments].
+
+== Characterizing a regular temperament ==
+=== Normal mapping matrices ===
+{{Main| Temperament mapping matrix }}
+{{See also| Normal forms #Normal forms for mappings }}
+
+Since an abstract temperament corresponds to some linear map, we can represent it as a matrix. We can [[Mathematical theory of saturation|saturate]] it and reduce it to the [[Hermite normal form]], which gives a unique representation. Applying this map to the vector representation of a rational interval gives an element in an abelian group representing the notes of the temperament. For example, the normal form for 7-limit miracle is 
+
+$$
+\begin{bmatrix}
+1 & 1 & 3 & 3 \\
+0 & 6 & -7 & -2 \\
+\end{bmatrix}
+$$
+
+and applying this to the vector for either 16/15 or 15/14 leads to [0&nbsp;1].
+
+=== Normal comma bases ===
+{{Main| Comma basis }}
+{{See also| Normal forms #Normal forms for commas }}
+
+A temperament may also be defined by a list of commas. By putting these into a normal form, the representation is also unique. Using commas has the advantage of showing family relationships more clearly.
+
+=== Plücker coordinates ===
+{{Main| Plücker coordinates }}
+
+This uses [[exterior algebra]] to give unique coordinates associated to the abstract regular temperament. 
+
+=== Frobenius projection matrix ===
+{{Main| Tenney-Euclidean Tuning #Frobenius tuning and Frobenius projection matrix }}
+
+Given any list of monzos, or any list of vals, we may compute the associated Frobenius projection matrix. This corresponds uniquely with an abstract regular temperament. The intervals of the abstract temperament may be defined via multiplication by the projection matrix, leading to [[fractional monzos]] which are actually the tunings of these intervals in [[Fractional monzos|Frobenius tuning]]. However, using the Frobenius projection matrix to define the abstract temperament by no means commits us to Frobenius tuning.
+
+=== Just intonation subgroups and transversals ===
+{{Main| Just intonation subgroups | Transversal }}
+{{See also| Gencom }}
+
+A relatively concrete approach, but one which is not canonically defined, is to define a [[transversal]] for the temperament by giving generators for a just intonation subgroup which when tempered becomes the notes of the temperament.
+
+For example, for [[Gamelismic clan #Miracle|miracle temperament]], [2,&nbsp;15/14] defines a rank-2 7-limit subgroup whose [[Normal lists #Normal interval list|normal interval list]] is [2,&nbsp;15/7]. We might also use [2,&nbsp;16/15], with a normal interval list [2,&nbsp;15]. When tempered by miracle, [2,&nbsp;15/14] and [2,&nbsp;16/15] lead to the same notes; hence we can use either for a transversal. Either pair may be considered a generating set for the abstract temperament.
+
+== Translation between methods of specifying temperaments ==
+The various methods for specifying an abstract regular temperament can be translated from one to another. Below we explain how to translate to and from reduced row echelon form (RREF). The point of using RREF as the transportation hub is that while it in some ways is not a very good system for musical purposes, it is quick and easy to compute, with no requirement to use Smith or Hermite normal forms or to make use of the pseudoinverse in its full generality.
+
+Maple code for the parts of these which do not call the Maple functions for Hermite normal form, Smith normal form or the pseudoinverse can be found in the article [[Basic abstract temperament translation code]].
+
+=== Frobenius projection matrices ===
+To translate from the Frobenius matrix to the RREF, simply reduce the matrix to RREF form in the usual way. To translate from RREF to the Frobenius matrix, if ''E'' is the RREF form then the matrix is ''E''{{+}}''E''. Here the definition for the pseudoinverse ''E''{{+}} using only matrix inverse and transpose can be used.
+
+=== Normal val lists ===
+To translate from the normal val list to the RREF, simply reduce the normal val list. To obtain the normal val list from the RREF, clear denominators from the rows of the RREF, saturate the result, reduce that to Hermite normal form and make the adjustment to normal val form.
+
+=== Normal comma lists ===
+To translate from the normal comma list to the RREF, find the null space of the matrix of monzos of the normal comma list in form of a matrix, take the transpose of that matrix, and reduce to the RREF. If ''E'' is the RREF, to find the normal comma list first find the Frobenius projection matrix by computing {{nowrap|''I'' − ''M''{{+}}''M''}}, where ''I'' is the identity matrix. Clear denominators from this, and saturate. Then reverse rows, reduce to Hermite normal form, reverse rows again, and adjust the result so that the monzos represent commas greater than one.
+
+== Geometry of regular temperaments ==
+{{Main|Plucker coordinates}}
+See also [[equivalence continuum]] for a description of the space of rank-''r'' temperaments supported by a given temperament, such as a rank-1 temperament, as an algebraic variety.
+
+[[File:dualzoom.gif|alt=dualzoom.gif|dualzoom.gif]]
+
+== See also ==
+* [[Tour of regular temperaments]]
+
+[[Category:Regular temperament theory]]
+[[Category:Math]]
+
+{{todo|reduce mathslang|improve definition|cleanup}}
