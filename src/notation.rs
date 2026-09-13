@@ -94,6 +94,11 @@ impl Notation {
 	/// `A#5` one way and `vBb5` the other. It also fails far more readily,
 	/// since most temperaments have no such notation.
 	///
+	/// An equal temperament is the exception, being rank 1 and so below the
+	/// octave and the fifth on its own. It is instead given the one accidental
+	/// worth a single step, which every other accidental is then a multiple
+	/// of; see [`equal_temperament`](Self::equal_temperament).
+	///
 	/// # Errors
 	/// Returns [`Error::Unsupported`] if the notation needs more accidentals
 	/// than there are symbols, if some prime has no accidental, or if
@@ -129,6 +134,10 @@ impl Notation {
 	fn minimal(temperament: &Temperament, accidentals: &Matrix<i64>) -> Result<Self, Error> {
 		let subgroup = temperament.subgroup();
 		let rank = temperament.rank();
+		if rank == 1 {
+			return Notation::equal_temperament(temperament, accidentals);
+		}
+
 		let keep = rank
 			.checked_sub(2)
 			.filter(|&keep| keep <= accidentals.len());
@@ -168,6 +177,57 @@ impl Notation {
 		Err(Error::Unsupported(format!(
 			"no {keep} of the accidentals of {subgroup} generate this rank {rank} temperament"
 		)))
+	}
+
+	/// Builds the notation of an equal temperament from the octave, the fifth
+	/// and a single accidental worth one step.
+	///
+	/// An equal temperament is rank 1, so it has no notation of its own rank:
+	/// the octave and the fifth alone already make two. What it has instead is
+	/// this, where the one accidental left counts steps. Every other accidental
+	/// is worth some whole number of steps and so becomes that many of the one
+	/// kept, which is what the commas record.
+	///
+	/// Keeping to accidentals of the form `(octave, fifth, prime)` means this
+	/// does not always work, since nothing says a step has to be one of them.
+	/// Most equal temperaments worth using pass; 12et and 19et do not, and
+	/// their enharmonics are the point of them anyway.
+	fn equal_temperament(
+		temperament: &Temperament,
+		accidentals: &Matrix<i64>,
+	) -> Result<Self, Error> {
+		let subgroup = temperament.subgroup();
+		let steps = accidentals
+			.iter()
+			.map(|a| Ok(temperament.map(a)?[0]))
+			.collect::<Result<Vec<i64>, Error>>()?;
+
+		// The accidental of the lowest prime that is worth a single step.
+		let index = steps.iter().position(|s| s.abs() == 1).ok_or_else(|| {
+			Error::Unsupported(format!(
+				"no accidental of {subgroup} is worth one step of this equal temperament"
+			))
+		})?;
+		let step = &accidentals[index];
+
+		// `a` is worth `steps[a]` steps and `step` is worth `steps[index]`,
+		// which is 1 or -1, so `a` is worth that many of `step` and the
+		// difference is tempered out.
+		let commas = accidentals
+			.iter()
+			.zip(&steps)
+			.enumerate()
+			.filter(|&(other, _)| other != index)
+			.map(|(_, (a, &worth))| {
+				let multiple = worth * steps[index];
+				a.iter()
+					.zip(step)
+					.map(|(x, y)| x - multiple * y)
+					.collect::<Vec<i64>>()
+			})
+			.collect();
+
+		Notation::assemble(subgroup, vec![step.clone()], commas)
 	}
 
 	/// Builds the notation with the given accidentals and commas, deriving the
@@ -367,6 +427,13 @@ mod tests {
 			.collect();
 		let temperament = Temperament::from_commas(&commas, &subgroup).unwrap();
 		Notation::from_temperament(&temperament, minimal).unwrap()
+	}
+
+	/// The notation of the equal temperament of `divisions` over `subgroup`.
+	fn et_notation(divisions: i64, subgroup: &str, minimal: bool) -> Result<Notation, Error> {
+		let subgroup: Subgroup = subgroup.parse().unwrap();
+		let temperament = Temperament::et(divisions, &subgroup).unwrap();
+		Notation::from_temperament(&temperament, minimal)
 	}
 
 	/// Whether the minimal notation of that temperament exists.
@@ -623,15 +690,51 @@ mod tests {
 	}
 
 	#[test]
-	fn minimal_fails_when_the_fifth_chain_does_not_reach() {
-		// An equal temperament is rank 1, and a notation needs the octave and
-		// the fifth at the very least. 12et is exactly the case where the
-		// enharmonics are the point.
-		let subgroup = Subgroup::p_limit(5);
-		let et = Temperament::et(12, &subgroup).unwrap();
-		assert!(Notation::from_temperament(&et, true).is_err());
-		assert!(Notation::from_temperament(&et, false).is_ok());
+	fn minimal_of_an_equal_temperament_counts_steps() {
+		// 22et has the syntonic comma as its step, so 5 takes the accidental
+		// and 7 sits on the fifth chain.
+		let n = et_notation(22, "2.3.5.7", true).unwrap();
+		assert_eq!(n.rank(), 3);
+		assert_eq!(accidental_ratios(&n), vec![(81, 80)]);
+		assert_eq!(note_of(&n, 5, 4), "vE5");
+		assert_eq!(note_of(&n, 7, 4), "Bb5");
 
+		// 31et is meantone, so its step is 64/63 instead and the two swap over.
+		let n = et_notation(31, "2.3.5.7", true).unwrap();
+		assert_eq!(accidental_ratios(&n), vec![(64, 63)]);
+		assert_eq!(note_of(&n, 5, 4), "E5");
+		assert_eq!(note_of(&n, 7, 4), "vBb5");
+
+		// Accidentals worth more than one step become that many of the one
+		// kept: in 72et the step is 81/80, and 64/63 is two of them while
+		// 33/32 is three.
+		let n = et_notation(72, "2.3.5.7.11", true).unwrap();
+		assert_eq!(n.rank(), 3);
+		assert_eq!(accidental_ratios(&n), vec![(81, 80)]);
+		assert_eq!(note_of(&n, 7, 4), "vvBb5");
+		assert_eq!(note_of(&n, 11, 8), "^^^F5");
+	}
+
+	#[test]
+	fn minimal_of_an_equal_temperament_needs_a_prime_step() {
+		// The step has to be an accidental of the usual kind. A meantone equal
+		// temperament tempers out the accidental for 5 and so has none worth a
+		// single step, which is just as well: the enharmonics of 12et are the
+		// whole point of it.
+		for divisions in [5, 7, 12, 19] {
+			assert!(et_notation(divisions, "2.3.5", true).is_err());
+			assert!(et_notation(divisions, "2.3.5", false).is_ok());
+		}
+		// 15et, 34et and 53et all have the syntonic comma as their step.
+		for divisions in [15, 34, 53] {
+			let n = et_notation(divisions, "2.3.5", true).unwrap();
+			assert_eq!(accidental_ratios(&n), vec![(81, 80)]);
+			assert_eq!(note_of(&n, 5, 4), "vE5");
+		}
+	}
+
+	#[test]
+	fn minimal_fails_when_the_fifth_chain_does_not_reach() {
 		// Blackwood is rank 2, but its fifth chain closes after five notes, so
 		// the octave and the fifth alone do not span it.
 		assert!(!has_minimal("2.3.5", &[(256, 243)]));

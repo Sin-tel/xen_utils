@@ -16,15 +16,12 @@ porcupine           | 2.3.5   | 250/243
 blackwood           | 2.3.5   | 256/243
 augmented           | 2.3.5   | 128/125
 diminished          | 2.3.5   | 648/625
-srutal              | 2.3.5   | 2048/2025
+diaschismic         | 2.3.5   | 2048/2025
 compton             | 2.3.5   | 531441/524288
 magic               | 2.3.5   | 3125/3072
-hanson              | 2.3.5   | 15625/15552
-wuerschmidt         | 2.3.5   | 393216/390625
+kleismic            | 2.3.5   | 15625/15552
 tetracot            | 2.3.5   | 20000/19683
 mavila              | 2.3.5   | 135/128
-dicot               | 2.3.5   | 25/24
-father              | 2.3.5   | 16/15
 
 # 2.3.7
 archytas            | 2.3.7   | 64/63
@@ -37,34 +34,33 @@ rastma              | 2.3.11  | 243/242
 # 7-limit
 septimal meantone   | 2.3.5.7 | 81/80, 126/125
 dominant            | 2.3.5.7 | 81/80, 64/63
-flattone            | 2.3.5.7 | 81/80, 525/512
-marvel              | 2.3.5.7 | 225/224
 miracle             | 2.3.5.7 | 225/224, 1029/1024
 orwell              | 2.3.5.7 | 225/224, 1728/1715
 magic               | 2.3.5.7 | 225/224, 3125/3072
 pajara              | 2.3.5.7 | 50/49, 64/63
 septimal blackwood  | 2.3.5.7 | 256/243, 49/48
 septimal porcupine  | 2.3.5.7 | 250/243, 64/63
-augene              | 2.3.5.7 | 128/125, 64/63
+# 7-limit rank 3
+marvel              | 2.3.5.7 | 225/224
+pele                | 2.3.5.7 | 5120/5103
 
 # 11-limit
-meanpop             | 2.3.5.7.11 | 81/80, 126/125, 385/384
+flattone            | 2.3.5.11| 45/44, 81/80
 huygens             | 2.3.5.7.11 | 81/80, 126/125, 99/98
 miracle             | 2.3.5.7.11 | 225/224, 1029/1024, 385/384
 marvel              | 2.3.5.7.11 | 225/224, 385/384
 
 # equal temperaments
+5et                 | 2.3.5      | et 5
+7et                 | 2.3.5      | et 7
 12et                | 2.3.5      | et 12
+15et                | 2.3.5      | et 15
 19et                | 2.3.5      | et 19
+34et                | 2.3.5      | et 34
 53et                | 2.3.5      | et 53
-12et                | 2.3.5.7    | et 12
 22et                | 2.3.5.7    | et 22
-31et                | 2.3.5.7    | et 31
-31et                | 2.3.5.7.11 | et 31
-41et                | 2.3.5.7.11 | et 41
+31et (7-limit)      | 2.3.5.7    | et 31
+31et (11-limit)     | 2.3.5.7.11 | et 31
+41et (7-limit)      | 2.3.5.7    | et 41
+41et (11-limit)     | 2.3.5.7.11 | et 41
 72et                | 2.3.5.7.11 | et 72
-
-# 13-limit, which needs four accidentals and so is at the limit of what the
-# placeholder symbols cover
-41et                | 2.3.5.7.11.13 | et 41
-marvel              | 2.3.5.7.11.13 | 225/224, 385/384, 325/324
