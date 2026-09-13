@@ -1,11 +1,11 @@
-//! Derives a notation for every temperament in `data/temperaments.txt` and
-//! prints how each one spells the primes it tempers.
+//! Lists every notation each temperament in `data/temperaments.txt` offers,
+//! and how each one spells the primes it tempers.
 //!
-//! Two notations are derived for each: the plain one, which only drops the
-//! accidentals the temperament tempers out, and the minimal one, which has no
-//! enharmonics at all and often does not exist. Each cell gives the rank of
-//! the notation followed by its spelling of every prime beyond 3, octave
-//! reduced. Run with `cargo run --example notations`.
+//! The first notation of a temperament is the smallest there is and the last
+//! keeps every accidental worth keeping; an equal temperament offers the whole
+//! run between them. Each row gives the rank of the notation, its accidentals,
+//! and its spelling of every prime beyond 3, octave reduced. Run with
+//! `cargo run --example notations`.
 
 use std::error::Error;
 
@@ -13,13 +13,7 @@ use xen_utils::{Notation, Subgroup, Temperament};
 
 const TEMPERAMENTS: &str = include_str!("../data/temperaments.txt");
 
-const HEADER: [&str; 5] = [
-	"temperament",
-	"subgroup",
-	"rank",
-	"plain notation",
-	"minimal notation",
-];
+const HEADER: [&str; 5] = ["temperament", "subgroup", "rank", "accidentals", "spelling"];
 
 fn main() {
 	let mut rows = vec![HEADER.map(String::from)];
@@ -29,8 +23,8 @@ fn main() {
 		if line.is_empty() {
 			continue;
 		}
-		match row(line) {
-			Ok(row) => rows.push(row),
+		match rows_for(line) {
+			Ok(entry) => rows.extend(entry),
 			Err(error) => eprintln!("line {}: {error}", number + 1),
 		}
 	}
@@ -38,8 +32,9 @@ fn main() {
 	print_table(&rows);
 }
 
-/// Parses one line of the list and derives both notations for it.
-fn row(line: &str) -> Result<[String; 5], Box<dyn Error>> {
+/// Parses one line of the list and lays out every notation it offers, one row
+/// each, naming the temperament only on the first.
+fn rows_for(line: &str) -> Result<Vec<[String; 5]>, Box<dyn Error>> {
 	let mut fields = line.split('|').map(str::trim);
 	let (Some(name), Some(subgroup), Some(definition), None) =
 		(fields.next(), fields.next(), fields.next(), fields.next())
@@ -50,13 +45,63 @@ fn row(line: &str) -> Result<[String; 5], Box<dyn Error>> {
 	let subgroup: Subgroup = subgroup.parse()?;
 	let temperament = parse_temperament(definition, &subgroup)?;
 
-	Ok([
-		name.to_string(),
-		subgroup.to_string(),
-		temperament.rank().to_string(),
-		describe(&temperament, false),
-		describe(&temperament, true),
-	])
+	let options = match Notation::options(&temperament) {
+		Ok(options) => options,
+		// A temperament with no notation still earns a row saying so.
+		Err(error) => {
+			return Ok(vec![[
+				name.to_string(),
+				subgroup.to_string(),
+				temperament.rank().to_string(),
+				"-".to_string(),
+				error.to_string(),
+			]]);
+		}
+	};
+
+	Ok(options
+		.iter()
+		.enumerate()
+		.map(|(index, notation)| {
+			let first = index == 0;
+			[
+				if first {
+					name.to_string()
+				} else {
+					String::new()
+				},
+				if first {
+					subgroup.to_string()
+				} else {
+					String::new()
+				},
+				if first {
+					temperament.rank().to_string()
+				} else {
+					String::new()
+				},
+				accidentals(notation),
+				spelling(notation),
+			]
+		})
+		.collect())
+}
+
+/// The accidentals of a notation, as ratios.
+fn accidentals(notation: &Notation) -> String {
+	let subgroup = notation.subgroup();
+	let list: Vec<String> = notation.generators()[2..]
+		.iter()
+		.map(|a| {
+			let (num, den) = subgroup.to_ratio(a).expect("an accidental is small");
+			format!("{num}/{den}")
+		})
+		.collect();
+	if list.is_empty() {
+		"-".to_string()
+	} else {
+		list.join(" ")
+	}
 }
 
 /// Parses the third field: `et N`, or a list of commas.
@@ -79,13 +124,8 @@ fn parse_temperament(definition: &str, subgroup: &Subgroup) -> Result<Temperamen
 	Ok(Temperament::from_commas(&commas, subgroup)?)
 }
 
-/// The rank of the derived notation and how it spells each prime beyond 3, or
-/// a dash if there is no such notation.
-fn describe(temperament: &Temperament, minimal: bool) -> String {
-	let Ok(notation) = Notation::from_temperament(temperament, minimal) else {
-		return "-".to_string();
-	};
-
+/// The rank of a notation and how it spells each prime beyond 3.
+fn spelling(notation: &Notation) -> String {
 	let subgroup = notation.subgroup();
 	let mut cell = format!("[{}]", notation.rank());
 	for index in 2..subgroup.dim() {
