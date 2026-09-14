@@ -1,6 +1,6 @@
 //! Regular temperaments as integer linear maps.
 
-use diophantine::{Matrix, eye, kernel_left, kernel_right, lll, saturation, transpose};
+use diophantine::{Matrix, eye, hnf, kernel_left, kernel_right, lll, saturation, transpose};
 
 use crate::Error;
 use crate::primes::{Subgroup, Weighting};
@@ -15,6 +15,16 @@ use crate::primes::{Subgroup, Weighting};
 /// when they have the same canonical form, regardless of choice of
 /// generators.
 ///
+/// A mapping that is not already saturated is refused rather than silently
+/// saturated: saturating it changes which temperament it describes, and
+/// `24et` over `2.3.5` is the case that makes this concrete. Both primes map
+/// to twice an odd number there, so it is contorted, and it saturates to
+/// `12et`, a different temperament with half the steps per octave. Returning
+/// that silently would answer a question nobody asked; erroring says the
+/// mapping given does not describe a valid temperament as such, and `24et`
+/// over `2.3.5.11` is what to ask for instead, whose quartertone breaks the
+/// contorsion.
+///
 /// The [`Subgroup`] the mapping is over is carried along with it, since a
 /// mapping matrix means nothing without knowing which rationals its columns
 /// refer to.
@@ -28,8 +38,14 @@ impl Temperament {
     /// Builds a temperament from a mapping matrix over `subgroup` (rows =
     /// generators, columns = basis elements).
     ///
-    /// The mapping is canonicalized, so the result does not depend on which
-    /// basis of generators the input happened to use.
+    /// The mapping is reduced to Hermite normal form, so the result does not
+    /// depend on which basis of generators the input happened to use.
+    ///
+    /// # Errors
+    /// Returns [`Error::Unsupported`] if the mapping is contorted, i.e. its
+    /// row lattice is not already saturated. Saturating it would silently
+    /// answer for a different temperament than the one asked for; see the
+    /// type documentation.
     pub fn from_mapping(mapping: &Matrix<i64>, subgroup: &Subgroup) -> Result<Self, Error> {
         if mapping.is_empty() {
             return Err(Error::InvalidDimensions("mapping must be non-empty".into()));
@@ -40,9 +56,20 @@ impl Temperament {
                 subgroup.dim()
             )));
         }
-        let mapping = saturation(mapping)?;
+
+        // The row lattice is saturated exactly when saturating it changes
+        // nothing: hnf reduces the lattice as given, saturation reduces the
+        // (possibly larger) saturated lattice, and the two agree exactly when
+        // there was no contorsion to begin with.
+        let canonical = hnf(mapping)?;
+        if saturation(mapping)? != canonical {
+            return Err(Error::Unsupported(format!(
+                "mapping over {subgroup} is contorted, and would saturate to a different temperament"
+            )));
+        }
+
         Ok(Temperament {
-            mapping,
+            mapping: canonical,
             subgroup: subgroup.clone(),
         })
     }
@@ -257,5 +284,33 @@ mod tests {
         let t = Temperament::from_commas(&[vec![-4, 4, -1]], &s).unwrap();
         assert_eq!(t.rank(), 2);
         assert_eq!(t.map(&[-4, 4, -1]).unwrap(), vec![0, 0]);
+    }
+
+    #[test]
+    fn tempering_out_a_squared_comma_is_not_garbage() {
+        // (81/80)^2 = 6561/6400 spans the same line as 81/80 itself, so
+        // tempering it out should be ordinary meantone - not some artifact of
+        // handing the kernel computation a non-primitive vector.
+        let s = Subgroup::p_limit(5);
+        let squared = Temperament::from_commas(&[vec![-8, 8, -2]], &s).unwrap();
+        let meantone = Temperament::from_commas(&[vec![-4, 4, -1]], &s).unwrap();
+        assert_eq!(squared, meantone);
+    }
+
+    #[test]
+    fn a_contorted_mapping_is_refused() {
+        // Every row is even, so the map only ever reaches even numbers: it is
+        // not surjective onto its own image and describes no single
+        // temperament. from_commas never produces this, since a kernel is
+        // always saturated - only from_mapping and et need the check.
+        let s = Subgroup::p_limit(5);
+        assert!(Temperament::from_mapping(&vec![vec![2, 0, 2], vec![0, 2, 2]], &s).is_err());
+
+        // 24et over 2.3.5 is the musical case: both primes land on twice an
+        // odd number, so it saturates to 12et rather than describing itself.
+        // 24et over 2.3.5.11 is what to ask for instead - its quartertone
+        // breaks the contorsion.
+        assert!(Temperament::et(24, &s).is_err());
+        assert!(Temperament::et(24, &"2.3.5.11".parse().unwrap()).is_ok());
     }
 }

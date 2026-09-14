@@ -7,7 +7,10 @@ fn main() {
     for subgroup in ["2.3.5", "2.3.5.7", "2.3.5.7.11"] {
         let subgroup: Subgroup = subgroup.parse().unwrap();
         for divisions in 5..=99 {
-            let t = Temperament::et(divisions, &subgroup).unwrap();
+            let Ok(t) = Temperament::et(divisions, &subgroup) else {
+                println!("{divisions}et over {subgroup}: contorted");
+                continue;
+            };
             let Ok(options) = Notation::options(&t) else {
                 println!("{divisions}et over {subgroup}: no notation");
                 continue;

@@ -43,7 +43,11 @@ fn main() {
     for subgroup in ["2.3.5", "2.3.5.7", "2.3.5.7.11"] {
         let subgroup: Subgroup = subgroup.parse().unwrap();
         for divisions in 5..=72 {
-            let t = Temperament::et(divisions, &subgroup).unwrap();
+            // A contorted equal temperament, such as 24et over 2.3.5, is
+            // refused rather than silently answered as a different one.
+            let Ok(t) = Temperament::et(divisions, &subgroup) else {
+                continue;
+            };
             failures += check(&format!("{divisions}et over {subgroup}"), &t);
         }
     }

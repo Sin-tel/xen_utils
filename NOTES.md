@@ -438,9 +438,14 @@ enumeration to bite, since the walk does not need an exact seed.
   notation keeping more than one accidental generally. A single accidental
   never needs a symbol of its own - see above - so a notation with only one
   works at any prime.
-- **`Temperament::et` silently defactors.** `et(24, 2.3.5)` saturates to
-  `[12, 19, 28]`, i.e. to 12et, because the 24et patent mapping of the 5-limit
-  is contorted. 24et as such cannot be asked for this way.
+- ~~`Temperament::et` silently defactors.~~ Fixed: `Temperament::from_mapping`
+  now refuses a contorted mapping instead of silently saturating it, since
+  saturating changes which temperament it describes. `et(24, 2.3.5)` is the
+  case that showed it, contorted and saturating to `12et`; it now errors
+  instead of returning `12et` for a question about `24et`. Checked by
+  comparing `hnf(mapping)` to `saturation(mapping)`, which agree exactly when
+  there is no contorsion. `from_commas` never needed the check: a kernel is
+  always saturated.
 - **An accidental defined as one step** - what ups-and-downs uses in general -
   is still not available, so an equal temperament with no `(2, 3, p)` accidental
   worth one step gets no notation rather than an arbitrary one. Over `2.3.5`
