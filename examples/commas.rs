@@ -77,7 +77,7 @@ fn show(name: &str, t: &Temperament) {
             .collect();
         let line = format!(
             "{} [{}] {:22} {:28} commas {:26} enharmonics {}",
-            if *n == recommended { " ->" } else { "   " },
+            if n.mapping() == recommended.mapping() { " ->" } else { "   " },
             n.rank(),
             accidentals.join(" "),
             spelling.join("  "),

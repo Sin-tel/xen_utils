@@ -420,10 +420,13 @@ enumeration to bite, since the walk does not need an exact seed.
   every interval within nineteen generators of the unison, over 59109 swept; the
   stalls past that are twenty octaves out, where the norm is minimized by
   trading a pile of one prime for a pile of another. See `SEARCH_RADIUS`.
-- **Derived `PartialEq` on `Notation` compares the stored comma basis**, so two
-  notations with the same mapping built from different bases of the same kernel
-  compare unequal. Nothing relies on it any more now that `options` builds the
-  whole run from one set of commas, but it is still a trap.
+- **`Notation` has no `PartialEq`.** It used to derive one, comparing the
+  stored comma basis, which meant two notations with the same mapping built
+  from different bases of the same kernel compared unequal - a trap, since
+  nothing about a notation's meaning depends on which basis its kernel happens
+  to be stored as. Struct equality was never actually what any caller wanted;
+  the places that compared two notations for being "the same" now compare
+  `mapping()` directly, which is what decides everything a notation does.
 - **Accidental symbols are keyed to the prime, with one exception.** A
   notation keeping more than one accidental gives each its own fixed symbol
   from `PRIME_SYMBOLS`, so the same prime prints the same way regardless of

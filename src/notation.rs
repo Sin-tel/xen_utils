@@ -64,7 +64,7 @@ const MAX_ACCIDENTAL_CENTS: f64 = 56.842_503_028_855_52;
 /// identically. [`from_ji`](Self::from_ji) has no commas at all, so spelling
 /// is a bijection; [`from_temperament`](Self::from_temperament) drops the
 /// accidentals a temperament makes redundant, and those become its commas.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct Notation {
     mapping: Matrix<i64>,
     generators: Matrix<i64>,
@@ -762,8 +762,8 @@ mod tests {
         // keeps its nominals, it is what is recommended too.
         for (subgroup, comma) in [("2.3.5", (81, 80)), ("2.3.7", (64, 63))] {
             assert_eq!(
-                options_of(subgroup, &[comma])[0],
-                tempered(subgroup, &[comma])
+                options_of(subgroup, &[comma])[0].mapping(),
+                tempered(subgroup, &[comma]).mapping()
             );
         }
     }
@@ -961,8 +961,8 @@ mod tests {
         let options = Notation::options(&temperament).unwrap();
         assert_eq!(ranks(&options), vec![2, 3, 4]);
         assert_eq!(
-            Notation::from_temperament(&temperament).unwrap(),
-            options[1]
+            Notation::from_temperament(&temperament).unwrap().mapping(),
+            options[1].mapping()
         );
 
         // Where in the run it lands is not fixed: septimal meantone, marvel and
@@ -974,8 +974,8 @@ mod tests {
             ("2.3.5", &[(32805, 32768)][..], 1),
         ] {
             assert_eq!(
-                tempered(subgroup, commas),
-                options_of(subgroup, commas)[wanted]
+                tempered(subgroup, commas).mapping(),
+                options_of(subgroup, commas)[wanted].mapping()
             );
         }
     }
@@ -991,7 +991,7 @@ mod tests {
         assert_eq!(note_of(&options[0], 11, 8), "F#5");
         assert_eq!(note_of(&options[1], 11, 8), "tF5");
         assert!(options[0].keeps_nominals().unwrap());
-        assert_eq!(tempered("2.3.5.11", flattone), options[0]);
+        assert_eq!(tempered("2.3.5.11", flattone).mapping(), options[0].mapping());
     }
 
     #[test]
