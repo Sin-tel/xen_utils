@@ -16,11 +16,23 @@ const NOMINALS: [char; 7] = ['F', 'C', 'G', 'D', 'A', 'E', 'B'];
 /// of the `C` that the fifth chain is centred on.
 const CENTRE_OCTAVE: i64 = 5;
 
-/// Raising and lowering symbols for each accidental, in order. These exist
-/// only so that [`Notation::note`] can print something legible; real
-/// microtonal accidentals are not in unicode, so anything that has to look
-/// right should render the notation coordinates itself.
-const ACCIDENTAL_SYMBOLS: [(char, char); 4] = [('^', 'v'), ('>', '<'), ('+', '-'), ('*', '%')];
+/// Raising and lowering symbols for each accidental, keyed by the prime it
+/// belongs to. These exist only so that [`Notation::note`] can print
+/// something legible; real microtonal accidentals are not in unicode, so
+/// anything that has to look right should render the notation coordinates
+/// itself.
+///
+/// Only consulted when a notation keeps more than one accidental - see
+/// [`accidental_symbol`]. A prime beyond `19` in such a notation has no entry
+/// here and so no symbol; that is the ceiling this stops at.
+const PRIME_SYMBOLS: [(u32, char, char); 6] = [
+    (5, '^', 'v'),
+    (7, '>', '<'),
+    (11, 't', 'd'),
+    (13, '*', '%'),
+    (17, '/', '\\'),
+    (19, ')', '('),
+];
 
 /// How far up and down the fifth chain to look for an accidental.
 const MAX_FIFTH_OFFSET: i64 = 64;
@@ -150,12 +162,18 @@ impl Notation {
         commas: Matrix<i64>,
     ) -> Result<Self, Error> {
         let subgroup = temperament.subgroup();
-        if accidentals.len() > ACCIDENTAL_SYMBOLS.len() {
-            return Err(Error::Unsupported(format!(
-                "notation over {subgroup} needs {} accidentals, but only {} are named",
-                accidentals.len(),
-                ACCIDENTAL_SYMBOLS.len()
-            )));
+        // A single accidental never needs a name of its own - see
+        // `accidental_symbol` - so only two or more accidentals require every
+        // one of them to have a prime in `PRIME_SYMBOLS`.
+        if accidentals.len() > 1 {
+            for a in &accidentals {
+                let prime = accidental_prime(subgroup, a);
+                if !PRIME_SYMBOLS.iter().any(|&(p, ..)| p == prime) {
+                    return Err(Error::Unsupported(format!(
+                        "notation over {subgroup} keeps more than one accidental, and prime {prime} has no symbol"
+                    )));
+                }
+            }
         }
 
         // The generators, as interval vectors: the octave, the fifth, then the
@@ -325,13 +343,13 @@ impl Notation {
     }
 
     /// Writes notation coordinates as a note in scientific pitch notation,
-    /// such as `C5`, `Eb4` or `vE5`.
+    /// such as `C5`, `Eb4`, `vE5` or `tF5`.
     ///
     /// The coordinates are read as an interval up from `C5`, so `(0, 0, ..)`
     /// is `C5` itself and `(0, 1, 0, ..)`, a fifth up, is `G5`. Accidentals
     /// come before the nominal and sharps and flats after it. The symbols are
     /// placeholders for debugging, since real microtonal accidentals are not in
-    /// unicode.
+    /// unicode; see [`accidental_symbol`] for how one is picked.
     ///
     /// # Panics
     /// Panics if `interval` does not have one entry per notation coordinate.
@@ -343,8 +361,10 @@ impl Notation {
         );
         let (octaves, fifths) = (interval[0], interval[1]);
 
+        let accidentals = &self.generators()[2..];
         let mut name = String::new();
-        for (&count, &(up, down)) in interval[2..].iter().zip(&ACCIDENTAL_SYMBOLS) {
+        for (&count, generator) in interval[2..].iter().zip(accidentals) {
+            let (up, down) = accidental_symbol(self.subgroup(), generator, accidentals.len());
             let symbol = if count < 0 { down } else { up };
             name.extend(std::iter::repeat_n(symbol, count.unsigned_abs() as usize));
         }
@@ -416,6 +436,49 @@ pub(crate) fn accidental(subgroup: &Subgroup, index: usize) -> Result<Vec<i64>, 
         "no accidental within {MAX_FIFTH_OFFSET} fifths of {} in {subgroup}",
         subgroup.basis()[index]
     )))
+}
+
+/// The prime `generator` raises or lowers: the one basis element beyond the
+/// octave and the fifth where it is nonzero.
+///
+/// Every accidental has support `{2, 3, p}` by construction, so this is always
+/// exactly one index.
+///
+/// # Panics
+/// Panics if `generator` has no such index, which cannot happen for a
+/// generator [`accidental`] produced.
+fn accidental_prime(subgroup: &Subgroup, generator: &[i64]) -> u32 {
+    let index = generator[2..]
+        .iter()
+        .position(|&e| e != 0)
+        .expect("an accidental has support on its own prime beyond 2 and 3");
+    subgroup.basis()[index + 2]
+}
+
+/// The raising and lowering symbols for one of a notation's accidentals, given
+/// how many accidentals it keeps in total.
+///
+/// A notation with only one accidental is using it as ups and downs does, for
+/// a generic small step, so it gets the generic `^`/`v` - unless it is the
+/// quartertone `33/32`, which already has its own ASCII shorthand, `t`/`d`.
+/// Once a second accidental is in play there is no such generic reading left,
+/// so each one gets its own fixed symbol from [`PRIME_SYMBOLS`], keyed by
+/// prime rather than by position: the same prime then always prints the same
+/// way, whichever other accidentals it shares the notation with.
+///
+/// # Panics
+/// Panics if `total > 1` and `generator`'s prime has no entry in
+/// [`PRIME_SYMBOLS`]; [`Notation::assemble`] checks this ahead of time.
+fn accidental_symbol(subgroup: &Subgroup, generator: &[i64], total: usize) -> (char, char) {
+    let prime = accidental_prime(subgroup, generator);
+    if total == 1 {
+        return if prime == 11 { ('t', 'd') } else { ('^', 'v') };
+    }
+    PRIME_SYMBOLS
+        .iter()
+        .find(|&&(p, ..)| p == prime)
+        .map(|&(_, up, down)| (up, down))
+        .expect("Notation::assemble checks every accidental beyond the first has a symbol")
 }
 
 #[cfg(test)]
@@ -589,14 +652,15 @@ mod tests {
         // bent by one accidental.
         assert_eq!(note_of(&notation("2.3.5"), 5, 4), "vE5");
         assert_eq!(note_of(&notation("2.3.7"), 7, 4), "vBb5");
-        assert_eq!(note_of(&notation("2.3.11"), 11, 8), "^F5");
+        // 33/32 alone is the quartertone, so it gets t/d rather than ^/v.
+        assert_eq!(note_of(&notation("2.3.11"), 11, 8), "tF5");
 
-        // Over the full subgroup they keep those spellings, and the symbols
-        // are assigned in order of the primes.
+        // Over the full subgroup they keep those spellings, and each symbol is
+        // now its prime's own: 11 keeps t/d even alongside the others.
         let n = notation("2.3.5.7.11");
         assert_eq!(note_of(&n, 5, 4), "vE5");
         assert_eq!(note_of(&n, 7, 4), "<Bb5");
-        assert_eq!(note_of(&n, 11, 8), "+F5");
+        assert_eq!(note_of(&n, 11, 8), "tF5");
         // 25/16 stacks two syntonic commas; 35/32 is a whole tone bent by both.
         assert_eq!(note_of(&n, 25, 16), "vvG#5");
         assert_eq!(note_of(&n, 35, 32), "v<D5");
@@ -741,7 +805,8 @@ mod tests {
         assert_eq!(note_of(&options[1], 7, 4), "vBb5");
         assert_eq!(note_of(&options[1], 11, 8), "^^F5");
         assert_eq!(accidental_ratios(&options[2]), vec![(81, 80), (33, 32)]);
-        assert_eq!(note_of(&options[2], 11, 8), ">F5");
+        // 11 keeps its own t/d now that it shares the notation with 5.
+        assert_eq!(note_of(&options[2], 11, 8), "tF5");
 
         // 72et needs its step, since its fifth chain closes early, and has two
         // further accidentals on top: 64/63 is worth two steps and 33/32 three.
@@ -821,7 +886,8 @@ mod tests {
         assert_eq!(ranks(&options), vec![3]);
         assert_eq!(accidental_ratios(&options[0]), vec![(33, 32)]);
         assert_eq!(note_of(&options[0], 5, 4), "E5");
-        assert_eq!(note_of(&options[0], 11, 8), "^F5");
+        // The sole accidental is the quartertone itself, so it is t/d.
+        assert_eq!(note_of(&options[0], 11, 8), "tF5");
     }
 
     #[test]
@@ -850,7 +916,8 @@ mod tests {
         }
         assert_eq!(note_of(&options[0], 7, 4), "A#5");
         assert_eq!(note_of(&options[1], 7, 4), "vBb5");
-        assert_eq!(note_of(&options[2], 11, 8), ">F5");
+        // 11 keeps t/d once 7 is kept alongside it too.
+        assert_eq!(note_of(&options[2], 11, 8), "tF5");
     }
 
     #[test]
@@ -915,14 +982,14 @@ mod tests {
 
     #[test]
     fn a_sharp_is_the_same_nominal() {
-        // Flattone writes 11/8 as F#, where just intonation has ^F. Seven fifths
+        // Flattone writes 11/8 as F#, where just intonation has tF. Seven fifths
         // leave the letter alone, so that is the same nominal and the smaller
         // notation is kept rather than taking on an accidental for 11.
         let flattone = &[(45, 44), (81, 80)][..];
         let options = options_of("2.3.5.11", flattone);
         assert_eq!(ranks(&options), vec![2, 3]);
         assert_eq!(note_of(&options[0], 11, 8), "F#5");
-        assert_eq!(note_of(&options[1], 11, 8), "^F5");
+        assert_eq!(note_of(&options[1], 11, 8), "tF5");
         assert!(options[0].keeps_nominals().unwrap());
         assert_eq!(tempered("2.3.5.11", flattone), options[0]);
     }
@@ -969,7 +1036,9 @@ mod tests {
 
     #[test]
     fn too_many_accidentals() {
-        assert!(Notation::from_ji(&Subgroup::p_limit(17)).is_err());
+        // 5, 7, 11, 13, 17 and 19 all have symbols; 23 does not.
+        assert!(Notation::from_ji(&Subgroup::p_limit(19)).is_ok());
+        assert!(Notation::from_ji(&Subgroup::p_limit(23)).is_err());
     }
 
     #[test]

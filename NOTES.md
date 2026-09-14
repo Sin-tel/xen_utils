@@ -424,12 +424,17 @@ enumeration to bite, since the walk does not need an exact seed.
   notations with the same mapping built from different bases of the same kernel
   compare unequal. Nothing relies on it any more now that `options` builds the
   whole run from one set of commas, but it is still a trap.
-- **Accidental symbols are positional**, so the same comma prints as `^` in one
-  notation of a temperament and `>` in another. Fine for debugging output;
-  wrong if symbols should be stable across a temperament's run, in which case
-  key them to the prime.
-- **Four symbols means 13-limit is the ceiling** for `from_ji`. Nothing else
-  limits the subgroup.
+- **Accidental symbols are keyed to the prime, with one exception.** A
+  notation keeping more than one accidental gives each its own fixed symbol
+  from `PRIME_SYMBOLS`, so the same prime prints the same way regardless of
+  what else is in the notation. A notation keeping exactly one is read as ups
+  and downs does, for a generic step, so it gets the generic `^`/`v` - unless
+  that one accidental is the quartertone `33/32`, which gets its own `t`/`d`
+  instead. `accidental_symbol` in `notation.rs` is the whole of this.
+- **Six symbols means 19-limit is the ceiling** for `from_ji`, and for any
+  notation keeping more than one accidental generally. A single accidental
+  never needs a symbol of its own - see above - so a notation with only one
+  works at any prime.
 - **`Temperament::et` silently defactors.** `et(24, 2.3.5)` saturates to
   `[12, 19, 28]`, i.e. to 12et, because the 24et patent mapping of the 5-limit
   is contorted. 24et as such cannot be asked for this way.
