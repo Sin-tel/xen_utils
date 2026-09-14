@@ -5,7 +5,7 @@ use diophantine::{Matrix, cvp_exact, lll};
 use crate::Error;
 use crate::notation::Notation;
 use crate::primes::{Subgroup, Weighting};
-use crate::util::{combination, subtract};
+use crate::util::subtract;
 
 /// How far to reduce the lattice before searching it.
 const LLL_DELTA: f64 = 0.99;
@@ -139,34 +139,45 @@ impl Simplifier {
     /// Ties under [`sopfr`] are common, since swapping which primes carry the
     /// interval often costs nothing; the quadratic norm settles most of them and
     /// the coordinates themselves settle the rest, so that the order never
-    /// depends on the order the ball is walked in.
+    /// depends on the order the ball is walked in. Sorting `(rank, candidate)`
+    /// pairs is exactly this: the coordinates are already the tie-break the
+    /// comment above promises, once the rank ties.
+    ///
+    /// This runs for every point of a ball of `width.pow(lattice.len())`
+    /// points, possibly several balls deep, so it is written to allocate once
+    /// per point (the candidate itself) rather than the handful `combination`,
+    /// `subtract` and a coordinate-carrying key each cost: `simplify` is on the
+    /// path a UI redraws from, not just a one-off.
     fn search(&self, seed: &[i64], radius: i64) -> Matrix<i64> {
         let width = (2 * radius + 1) as usize;
         let mut best = seed.to_vec();
         let mut seen = Vec::new();
 
-        // Every round strictly lowers the key, which cannot go on for ever, so
+        // Every round strictly lowers the rank, which cannot go on for ever, so
         // this terminates whatever the radius.
         loop {
             let mut improved = best.clone();
-            for point in 0..width.pow(self.lattice.len() as u32) {
-                let mut remaining = point;
-                let counts: Vec<i64> = (0..self.lattice.len())
-                    .map(|_| {
-                        let digit = (remaining % width) as i64 - radius;
-                        remaining /= width;
-                        digit
-                    })
-                    .collect();
+            let mut improved_rank = self.rank(&improved);
 
-                let candidate = subtract(
-                    &best,
-                    &combination(&counts, &self.lattice, self.subgroup.dim()),
-                );
-                if self.key(&candidate) < self.key(&improved) {
-                    improved.clone_from(&candidate);
+            for point in 0..width.pow(self.lattice.len() as u32) {
+                let mut candidate = best.clone();
+                let mut remaining = point;
+                for row in &self.lattice {
+                    let digit = (remaining % width) as i64 - radius;
+                    remaining /= width;
+                    if digit != 0 {
+                        for (c, &r) in candidate.iter_mut().zip(row) {
+                            *c -= digit * r;
+                        }
+                    }
                 }
-                seen.push((self.key(&candidate), candidate));
+
+                let rank = self.rank(&candidate);
+                if rank < improved_rank {
+                    improved.clone_from(&candidate);
+                    improved_rank = rank;
+                }
+                seen.push((rank, candidate));
             }
             if improved == best {
                 break;
@@ -179,16 +190,18 @@ impl Simplifier {
         seen.into_iter().map(|(_, interval)| interval).collect()
     }
 
-    /// What the search minimizes: the Wilson norm, the quadratic norm standing
-    /// in for it as a tie-break, and the coordinates to settle the rest.
-    fn key(&self, interval: &[i64]) -> (i64, i64, Vec<i64>) {
+    /// What the search minimizes: the Wilson norm, and the quadratic norm
+    /// standing in for it as a tie-break. Cheap on purpose - no allocation - so
+    /// that ranking every point of a ball costs nothing beyond visiting it; the
+    /// interval itself is the tie-break beneath this, once paired up with it.
+    fn rank(&self, interval: &[i64]) -> (i64, i64) {
         let primes = self.subgroup.basis();
         let squared = interval
             .iter()
             .zip(primes)
             .map(|(&e, &p)| i64::from(p) * i64::from(p) * e * e)
             .sum();
-        (sopfr(interval, primes), squared, interval.to_vec())
+        (sopfr(interval, primes), squared)
     }
 }
 

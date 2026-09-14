@@ -412,6 +412,43 @@ differ are the same twenty-octaves-out stalls the radius has. But the seed is
 nothing. Worth remembering if the lattice ever gets big enough for `cvp_exact`'s
 enumeration to bite, since the walk does not need an exact seed.
 
+## Performance
+
+This is meant for a DAW's UI thread, not its audio thread, so constructing a
+`Notation` or a `Simplifier` is not a concern - built once, reused after.
+`cargo run --release --example bench` times what does run repeatedly:
+`to_notation`, `to_just`, `simplify` and `candidates`.
+
+`to_notation` and `to_just` are 35-40 nanoseconds regardless of subgroup - one
+allocation, one pass over a handful of coordinates. Not worth a second thought.
+
+`simplify` and `candidates` are the real cost, since `Simplifier::search` walks
+a ball of `width.pow(lattice rank)` points, each a candidate interval - 625 of
+them for 41et's 11-limit notation, 3125 for the 13-limit. It used to compute
+the sort key up to three times per point, each one cloning the whole
+coordinate vector just to break ties with it - the tie-break the comment
+already promised is exactly what sorting `(rank, candidate)` pairs gives for
+free, no separate copy needed. Fixed by ranking each candidate once, with a
+key that carries no coordinates, and building each candidate as a single
+`clone` of `best` mutated in place instead of a `combination` and a `subtract`
+composed from scratch. Six allocations a point down to one: 41et's 11-limit
+notation went from 165 to 55 microseconds a call, the 13-limit from 820 to 257.
+
+That remaining allocation is one clone of the interval per point examined, and
+is not coming out: every point may end up in the returned list, so it has to
+own its coordinates. Nothing about `Matrix`'s nested-`Vec` representation is
+the bottleneck here - `to_notation` and `to_just` already show that reading a
+small matrix is noise next to a single allocation, and `search`'s cost is the
+combinatorial walk, not how the lattice it reads is laid out. A flatter,
+strided matrix type is a reasonable thing to want for other reasons, but it
+would not move these numbers.
+
+At a few tens to a few hundred microseconds a call, simplifying every visible
+note every redraw is affordable at any subgroup this library is likely to see
+in practice. If a future subgroup ever makes the lattice rank large enough for
+this to matter again, the width of the ball - not its allocation pattern - is
+where the exponential lives.
+
 ## Loose ends and known limits
 
 - **The simplifier is a local search, not a proof.** `Simplifier` reduces the
