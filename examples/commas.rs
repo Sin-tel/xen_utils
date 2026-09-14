@@ -2,6 +2,16 @@
 //! to how it spells the primes. The commas are the choice being made: the
 //! spelling is only one representative of its enharmonic class, but the kernel
 //! is the notation.
+//!
+//! The enharmonics are the other half of that: the intervals the temperament
+//! calls a unison but the notation still spells apart. Together the two account
+//! for every comma the temperament tempers out, and the enharmonics are what a
+//! spelling may be reduced by. An equal temperament always has some, since no
+//! notation can close the circle of fifths - in 12et the enharmonic is the
+//! pythagorean comma, which is what leaves `C#` and `Db` to differ.
+//!
+//! `->` marks the notation `Notation::from_temperament` recommends: the smallest
+//! one that spells every prime on the nominal just intonation gives it.
 
 use std::error::Error;
 
@@ -39,6 +49,7 @@ fn show(name: &str, t: &Temperament) {
             return;
         }
     };
+    let recommended = Notation::from_temperament(t).expect("the run is not empty");
     for n in &options {
         let accidentals: Vec<String> = n.generators()[2..]
             .iter()
@@ -47,6 +58,10 @@ fn show(name: &str, t: &Temperament) {
         let commas: Vec<String> = reduced(subgroup, n.commas())
             .iter()
             .map(|c| ratio(subgroup, c))
+            .collect();
+        let enharmonics: Vec<String> = reduced(subgroup, &n.enharmonics(t).unwrap())
+            .iter()
+            .map(|e| ratio(subgroup, e))
             .collect();
         let spelling: Vec<String> = (2..subgroup.dim())
             .map(|index| {
@@ -60,20 +75,24 @@ fn show(name: &str, t: &Temperament) {
                 )
             })
             .collect();
-        println!(
-            "    [{}] {:22} {:28} commas {}",
+        let line = format!(
+            "{} [{}] {:22} {:28} commas {:26} enharmonics {}",
+            if *n == recommended { " ->" } else { "   " },
             n.rank(),
             accidentals.join(" "),
             spelling.join("  "),
-            commas.join(" ")
+            commas.join(" "),
+            enharmonics.join(" ")
         );
+        println!("{}", line.trim_end());
     }
 }
 
-/// A kernel basis reduced to small, ascending commas, the way
-/// `Temperament::reduced_comma_basis` does it. The stored basis has one comma
-/// per dropped accidental, which is the right thing to build the notation from
-/// but not the right thing to read.
+/// A lattice basis reduced to small, ascending intervals, the way
+/// `Temperament::reduced_comma_basis` does it. Neither basis the library hands
+/// back is reduced: the commas are one per dropped accidental and the
+/// enharmonics are whatever the kernel computation gave, which is the right
+/// thing to build on but not the right thing to read.
 fn reduced(subgroup: &Subgroup, commas: &Matrix<i64>) -> Matrix<i64> {
     if commas.is_empty() {
         return Vec::new();
@@ -81,14 +100,8 @@ fn reduced(subgroup: &Subgroup, commas: &Matrix<i64>) -> Matrix<i64> {
     let weights = subgroup.weights(Weighting::Wilson);
     let basis = lll(commas, 0.99, &weights).expect("a kernel basis over this subgroup");
     basis
-        .into_iter()
-        .map(|comma| {
-            if subgroup.to_cents(&comma) < 0.0 {
-                comma.iter().map(|x| -x).collect()
-            } else {
-                comma
-            }
-        })
+        .iter()
+        .map(|comma| subgroup.ascending(comma))
         .collect()
 }
 

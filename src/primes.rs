@@ -162,6 +162,19 @@ impl Subgroup {
                 .sum::<f64>()
     }
 
+    /// `interval` if it is ascending and its inverse if it is descending, so
+    /// that the result is never less than a unison.
+    ///
+    /// # Panics
+    /// Panics if `interval` does not have one entry per basis element.
+    pub fn ascending(&self, interval: &[i64]) -> Vec<i64> {
+        if self.to_cents(interval) < 0.0 {
+            interval.iter().map(|exponent| -exponent).collect()
+        } else {
+            interval.to_vec()
+        }
+    }
+
     /// The diagonal weight matrix on interval-vector coordinates, under
     /// `weighting`.
     pub fn weights(&self, weighting: Weighting) -> Matrix<f64> {

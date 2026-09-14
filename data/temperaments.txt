@@ -27,6 +27,7 @@
 meantone            | 2.3.5      | 81/80
 septimal meantone   | 2.3.5.7    | 81/80, 126/125
 huygens             | 2.3.5.7.11 | 81/80, 126/125, 99/98
+flattone            | 2.3.5.11   | 45/44, 81/80
 
 # 5-limit basics
 schismatic          | 2.3.5   | 32805/32768

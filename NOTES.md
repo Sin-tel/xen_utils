@@ -150,12 +150,13 @@ temperament special case is gone. Each accidental is put in one of four classes:
 - **optional** - the rest. The run takes them on one at a time, from keeping only
   the necessary ones to keeping them all.
 
-**Necessary** is a search, `Notation::necessary`. A subset works when the images
+**Necessary** is a search, `Search::necessary`. A subset works when the images
 of the octave, the fifth and those accidentals generate the whole tempered
 lattice - otherwise some interval the temperament distinguishes has no spelling.
 Accidentals offered first are kept first where there is a choice. The smallest
 subset has `rank - 2` members exactly when a notation of the temperament's own
-rank exists, so the old `minimal` is this search and needs no separate code.
+rank exists, so the old `minimal` end of the run is this search and needs no
+separate code.
 
 The rank 1 tests of the old code turn out to be this search written out: the
 fifth chain reaching every note is `gcd(divisions, fifth) == 1`, i.e. the empty
@@ -164,7 +165,7 @@ downs rule: for an equal temperament the finest accidental is one step**.
 Spanning only needs `gcd(divisions, fifth, steps) == 1`, which 25et meets with
 `81/80` worth two steps - but a notation with no symbol for a single step can
 only reach single steps by walking the fifth chain, which is not how anyone
-writes such a temperament. So `Notation::candidates` gives an equal temperament
+writes such a temperament. So `Search::candidates` gives an equal temperament
 nothing to work with unless some accidental is worth one step, and puts that one
 first. **25et, 51et and 54et therefore have no notation** over `2.3.5`, and the
 answer for them is a subgroup whose accidental does fit: 24et is contorted over
@@ -265,10 +266,95 @@ the substitution compounds: `33/32` becomes two syntonic commas and each of
 those becomes twelve fifths. That is the price of kernel nesting, and it is
 `simplify`'s business, not the mapping's.
 
+## Which notation to recommend
+
+`from_temperament` no longer takes an end of the run. It returns **the smallest
+notation that keeps every nominal**: one where each prime is spelled on the
+letter just intonation gives it. Each further accidental is another symbol to
+read, so smaller is better - but not at the price of moving a prime onto another
+letter.
+
+41et is the case that makes it obvious once the run is laid out:
+
+```
+   [2]  5/4 Fb5   7/4 Cbb6   11/8 D###5
+-> [3]  5/4 vE5   7/4 vBb5   11/8 ^^F5
+   [4]  5/4 vE5   7/4 vBb5   11/8 >F5
+```
+
+`[2]` has all three primes off their nominals; `[4]` only turns the two marks of
+`[3]` into one of another kind, so `[3]` is the one wanted.
+
+**Sharps and flats do not count.** Seven fifths leave the letter alone, so the
+test is on the fifth coordinate mod 7, not on the coordinate itself. Flattone is
+the case that forces this:
+
+```
+-> [2]  5/4 E5  11/8 F#5
+   [3]  5/4 E5  11/8 ^F5
+```
+
+`F#` is not `^F`, but it is still an `F`, so `[2]` qualifies and there is no
+reason to take on an accidental for 11.
+
+The nominal just intonation gives a prime needs no separate notation to compute.
+The accidental `a` has exponent `s = +-1` on the prime, so the prime sits
+`-s * a[1]` fifths along the chain - `just_nominal` is that one line. The
+syntonic comma has `s = -1` and four threes, hence 5 on `E`.
+
+Which tier of `comma` was used is what decides this in practice: a replacement
+built as a plain stack of accidentals keeps the nominal by construction, and only
+a walk along the fifth chain can move it. Flattone shows a walk landing on the
+same letter anyway, so the test has to be on the spelling rather than on which
+tier ran.
+
+**Where nothing qualifies** the recommendation falls back to the last notation.
+That happens when every accidental has to be replaced by a chain walk that misses
+- 13et over `2.3.5` is the smallest, its syntonic comma being worth two steps
+while its fifth chain still reaches every note, so it escapes the refusal that
+25et gets. Over every equal temperament to 200 across fourteen subgroups, 1157 of
+2245 runs have no notation keeping its nominals, and **not one of them offers a
+choice**: every single one is a run of length one. So the fallback never actually
+decides anything, and the rule is unambiguous wherever there is anything to
+decide. `a_run_with_a_choice_always_keeps_its_nominals_somewhere` pins that down.
+
+## Enharmonics
+
+`ker(notation)` is what the notation spells alike; the **enharmonic lattice** is
+what the temperament calls a unison and the notation still spells apart. Between
+them they account for everything the temperament tempers out, which `verify` now
+checks:
+
+```
+rank(ker notation) + rank(enharmonics) == dim - rank(temperament)
+```
+
+`Notation::enharmonics(temperament)` is `kernel_left` of the generator images,
+returned as interval vectors so that it matches `commas()`. `to_interval` puts
+one back in notation coordinates, and that is the form worth reading: 22et's
+rank 3 notation gives `[0, 1, -13]` and `[1, 0, -22]`, i.e. its fifth is thirteen
+ups and its octave twenty two - the whole of ups and downs in 22et, which the
+mapping always implied but never stated.
+
+Every notation of an equal temperament has one, and has to: `assemble` sends each
+generator to its own unit vector, so a notation is free on the octave, the fifth
+and its accidentals and can never close the circle of fifths. 12et's enharmonic
+is the pythagorean comma, 7et's the apotome, 5et's the limma. That is the
+`C# != Db` property, not a defect.
+
+## Where the code lives
+
+- `notation.rs` - the `Notation` type: its mapping, its kernel, its enharmonics,
+  `assemble`, `note`, and the derivation of a single accidental.
+- `search.rs` - everything behind `Notation::options`. `Search` holds the
+  temperament, the accidentals and their images; `Plan` is how it sorts them into
+  necessary, optional and never kept. Tested through `options`.
+- `util.rs` - integer vector helpers, with no music in them.
+
 ## Loose ends and known limits
 
 - **`simplify` is not started.** The pieces it needs are in place: the
-  enharmonic lattice is `kernel_left` of the generator images, and reduction is
+  enharmonic lattice is `Notation::enharmonics`, and reduction is
   a small closest-vector problem in a metric that ignores the octave
   coordinate. `diophantine` has `lll`, `nearest_plane` and `cvp_exact`; a
   bounded box search after reduction also works and takes an arbitrary cost

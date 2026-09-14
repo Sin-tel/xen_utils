@@ -13,7 +13,9 @@
 pub mod error;
 pub mod notation;
 pub mod primes;
+mod search;
 pub mod temperament;
+mod util;
 
 pub use diophantine::Matrix;
 pub use error::Error;

@@ -127,15 +127,21 @@ impl Temperament {
         let weights = self.subgroup.weights(Weighting::Wilson);
         let reduced = lll(&commas, 0.99, &weights)?;
         Ok(reduced
-            .into_iter()
-            .map(|comma| {
-                if self.subgroup.to_cents(&comma) < 0.0 {
-                    comma.iter().map(|x| -x).collect()
-                } else {
-                    comma
-                }
-            })
+            .iter()
+            .map(|comma| self.subgroup.ascending(comma))
             .collect())
+    }
+
+    /// Applies the mapping to each of `intervals`, one row per interval.
+    ///
+    /// # Errors
+    /// Returns [`Error::InvalidDimensions`] if any of them does not have one
+    /// entry per basis element of the subgroup.
+    pub fn map_all(&self, intervals: &Matrix<i64>) -> Result<Matrix<i64>, Error> {
+        intervals
+            .iter()
+            .map(|interval| self.map(interval))
+            .collect()
     }
 
     /// Applies the mapping to an interval, returning its tempered representation

@@ -5,6 +5,8 @@
 //!   * each generator maps to its unit vector, so `assemble` inverted right;
 //!   * `ker(notation)` is contained in `ker(temperament)`, i.e. the notation
 //!     never spells two intervals the temperament tells apart the same way;
+//!   * the kernel and the enharmonic lattice account between them for every
+//!     comma the temperament tempers out, so neither is too small;
 //!   * kernels nest: a smaller notation spells alike everything a larger one
 //!     does, so a larger notation's spelling can be simplified onto a smaller
 //!     one's;
@@ -106,6 +108,30 @@ fn check(name: &str, t: &Temperament) -> usize {
             fail(format!(
                 "option {index}: comma count does not fill out the rank"
             ));
+        }
+
+        // What the notation spells alike and what it still spells apart have to
+        // account between them for everything the temperament tempers out.
+        let enharmonics = n.enharmonics(t).unwrap();
+        let tempered = n.dim() - t.rank();
+        if n.commas().len() + enharmonics.len() != tempered {
+            fail(format!(
+                "option {index}: {} commas and {} enharmonics are not the {tempered} dimensions tempered out",
+                n.commas().len(),
+                enharmonics.len(),
+            ));
+        }
+        for enharmonic in &enharmonics {
+            if t.map(enharmonic).unwrap().iter().any(|&x| x != 0) {
+                fail(format!(
+                    "option {index}: the enharmonic {enharmonic:?} is not tempered out"
+                ));
+            }
+            if n.to_interval(enharmonic).unwrap().iter().all(|&x| x == 0) {
+                fail(format!(
+                    "option {index}: the enharmonic {enharmonic:?} is spelled as a unison"
+                ));
+            }
         }
     }
 
