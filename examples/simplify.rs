@@ -8,9 +8,11 @@
 
 use xen_utils::{Notation, Simplifier, Subgroup, Temperament};
 
+const DIVISIONS: i64 = 41;
+
 fn main() {
     let subgroup: Subgroup = "2.3.5.7.11".parse().unwrap();
-    let temperament = Temperament::et(41, &subgroup).unwrap();
+    let temperament = Temperament::et(DIVISIONS, &subgroup).unwrap();
     let notation = Notation::from_temperament(&temperament).unwrap();
     let simplifier = Simplifier::new(&notation).unwrap();
 
@@ -20,19 +22,18 @@ fn main() {
         let ascending = subgroup.ascending(comma);
         println!("    {:?}  {}", ascending, ratio(&subgroup, &ascending));
     }
-    println!("\nups  simplest  note    stacked up");
+    println!("\nups  simplest  note");
 
-    for ups in 0..=41 {
+    for ups in 0..=DIVISIONS {
         let mut spelling = vec![0; notation.rank()];
         spelling[2] = ups;
 
         let stacked = notation.to_just(&spelling).unwrap();
         let simplified = simplifier.simplify(&stacked).unwrap();
         println!(
-            "{ups:3}  {:8}  {:6}  {}",
+            "{ups:3}  {:8}  {:6}",
             ratio(&subgroup, &simplified),
             notation.note(&notation.to_notation(&simplified).unwrap()),
-            notation.note(&spelling),
         );
     }
 }
