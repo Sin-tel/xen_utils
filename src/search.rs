@@ -352,11 +352,7 @@ impl<'a> Search<'a> {
             .filter(|(index, _)| !kept.contains(index))
             .map(|(_, comma)| comma.clone())
             .collect();
-        Notation::assemble(
-            self.temperament.subgroup(),
-            select(&self.accidentals, &kept),
-            kernel,
-        )
+        Notation::assemble(self.temperament, select(&self.accidentals, &kept), kernel)
     }
 }
 

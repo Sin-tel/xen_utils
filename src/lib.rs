@@ -14,6 +14,7 @@ pub mod error;
 pub mod notation;
 pub mod primes;
 mod search;
+pub mod simplify;
 pub mod temperament;
 mod util;
 
@@ -21,4 +22,5 @@ pub use diophantine::Matrix;
 pub use error::Error;
 pub use notation::Notation;
 pub use primes::{Subgroup, Weighting};
+pub use simplify::Simplifier;
 pub use temperament::Temperament;

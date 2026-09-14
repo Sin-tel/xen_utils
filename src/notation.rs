@@ -57,7 +57,7 @@ pub struct Notation {
     mapping: Matrix<i64>,
     generators: Matrix<i64>,
     commas: Matrix<i64>,
-    subgroup: Subgroup,
+    temperament: Temperament,
 }
 
 impl Notation {
@@ -71,7 +71,7 @@ impl Notation {
         let accidentals = (2..subgroup.dim())
             .map(|index| accidental(subgroup, index))
             .collect::<Result<Matrix<i64>, Error>>()?;
-        Notation::assemble(subgroup, accidentals, Vec::new())
+        Notation::assemble(&Temperament::just(subgroup)?, accidentals, Vec::new())
     }
 
     /// Builds the notation of `temperament` worth recommending: the smallest of
@@ -145,10 +145,11 @@ impl Notation {
     /// Builds the notation with the given accidentals and commas, deriving the
     /// mapping from them.
     pub(crate) fn assemble(
-        subgroup: &Subgroup,
+        temperament: &Temperament,
         accidentals: Matrix<i64>,
         commas: Matrix<i64>,
     ) -> Result<Self, Error> {
+        let subgroup = temperament.subgroup();
         if accidentals.len() > ACCIDENTAL_SYMBOLS.len() {
             return Err(Error::Unsupported(format!(
                 "notation over {subgroup} needs {} accidentals, but only {} are named",
@@ -176,7 +177,7 @@ impl Notation {
             mapping,
             generators,
             commas,
-            subgroup: subgroup.clone(),
+            temperament: temperament.clone(),
         })
     }
 
@@ -211,23 +212,16 @@ impl Notation {
     /// leaves `C#` and `Db` to differ.
     ///
     /// The basis is whatever falls out of the kernel computation, so it is not
-    /// reduced to small intervals; [`to_interval`](Self::to_interval) puts each
+    /// reduced to small intervals; [`to_notation`](Self::to_notation) puts each
     /// one back in notation coordinates, where the `[0, 1, -13]` of 22et reads
     /// as its fifth being thirteen of its accidental.
     ///
     /// # Errors
-    /// Returns [`Error::InvalidSubgroup`] if `temperament` is over a different
-    /// subgroup than this notation.
-    pub fn enharmonics(&self, temperament: &Temperament) -> Result<Matrix<i64>, Error> {
-        if temperament.subgroup() != &self.subgroup {
-            return Err(Error::InvalidSubgroup(format!(
-                "this notation is over {}, but the temperament is over {}",
-                self.subgroup,
-                temperament.subgroup()
-            )));
-        }
+    /// Returns [`Error::InvalidDimensions`] if the generators are somehow not
+    /// mappable by the temperament.
+    pub fn enharmonics(&self) -> Result<Matrix<i64>, Error> {
         // The combinations of the generators the temperament sends to nothing.
-        let images = temperament.map_all(&self.generators)?;
+        let images = self.temperament.map_all(&self.generators)?;
         Ok(kernel_left(&images)?
             .iter()
             .map(|counts| combination(counts, &self.generators, self.dim()))
@@ -253,8 +247,8 @@ impl Notation {
         for index in 2..self.dim() {
             let mut prime = vec![0i64; self.dim()];
             prime[index] = 1;
-            let fifths = self.to_interval(&prime)?[1];
-            let just = just_nominal(&accidental(&self.subgroup, index)?, index);
+            let fifths = self.to_notation(&prime)?[1];
+            let just = just_nominal(&accidental(self.subgroup(), index)?, index);
             if fifths.rem_euclid(NOMINALS.len() as i64) != just {
                 return Ok(false);
             }
@@ -262,9 +256,15 @@ impl Notation {
         Ok(true)
     }
 
+    /// The temperament being notated. [`from_ji`](Self::from_ji) notates
+    /// just intonation itself, which tempers nothing out.
+    pub fn temperament(&self) -> &Temperament {
+        &self.temperament
+    }
+
     /// The just intonation subgroup being notated.
     pub fn subgroup(&self) -> &Subgroup {
-        &self.subgroup
+        self.temperament.subgroup()
     }
 
     /// The number of notation coordinates.
@@ -275,15 +275,19 @@ impl Notation {
     /// The rank of the subgroup being notated, i.e. the length of the interval
     /// vectors this notation maps.
     pub fn dim(&self) -> usize {
-        self.subgroup.dim()
+        self.subgroup().dim()
     }
 
     /// Rewrites a just interval in notation coordinates.
     ///
+    /// This is the notation's mapping applied to `interval`, so everything in
+    /// the kernel comes out the same: two intervals differing by a
+    /// [comma](Self::commas) are one spelling.
+    ///
     /// # Errors
     /// Returns [`Error::InvalidDimensions`] if `interval` does not have one
     /// entry per basis element of the subgroup.
-    pub fn to_interval(&self, interval: &[i64]) -> Result<Vec<i64>, Error> {
+    pub fn to_notation(&self, interval: &[i64]) -> Result<Vec<i64>, Error> {
         if interval.len() != self.dim() {
             return Err(Error::InvalidDimensions(format!(
                 "interval has {} entries, expected {}",
@@ -296,6 +300,28 @@ impl Notation {
             .iter()
             .map(|row| row.iter().zip(interval).map(|(a, b)| a * b).sum())
             .collect())
+    }
+
+    /// Rewrites notation coordinates as the just interval they count out: so
+    /// many octaves, fifths and accidentals stacked up.
+    ///
+    /// This is a one sided inverse of [`to_notation`](Self::to_notation).
+    /// Spelling a just interval and stacking it back up returns a different
+    /// interval wherever the notation has commas, since the spelling is all
+    /// that survives; going the other way round is exact.
+    ///
+    /// # Errors
+    /// Returns [`Error::InvalidDimensions`] if `coordinates` does not have one
+    /// entry per notation coordinate.
+    pub fn to_just(&self, coordinates: &[i64]) -> Result<Vec<i64>, Error> {
+        if coordinates.len() != self.rank() {
+            return Err(Error::InvalidDimensions(format!(
+                "interval has {} entries, expected {}",
+                coordinates.len(),
+                self.rank()
+            )));
+        }
+        Ok(combination(coordinates, &self.generators, self.dim()))
     }
 
     /// Writes notation coordinates as a note in scientific pitch notation,
@@ -447,7 +473,7 @@ mod tests {
     /// The note name of a ratio, read as an interval up from C5.
     fn note_of(n: &Notation, num: u64, den: u64) -> String {
         let interval = n.subgroup().factorize(num, den).unwrap();
-        n.note(&n.to_interval(&interval).unwrap())
+        n.note(&n.to_notation(&interval).unwrap())
     }
 
     #[test]
@@ -467,7 +493,7 @@ mod tests {
             for (index, generator) in n.generators().iter().enumerate() {
                 let mut unit = vec![0; n.rank()];
                 unit[index] = 1;
-                assert_eq!(n.to_interval(generator).unwrap(), unit);
+                assert_eq!(n.to_notation(generator).unwrap(), unit);
             }
         }
     }
@@ -500,7 +526,7 @@ mod tests {
     fn five_limit_mapping() {
         let n = notation("2.3.5");
         // 5 is four fifths up, lowered by a syntonic comma.
-        assert_eq!(n.to_interval(&[0, 0, 1]).unwrap(), vec![0, 4, -1]);
+        assert_eq!(n.to_notation(&[0, 0, 1]).unwrap(), vec![0, 4, -1]);
         assert_eq!(
             n.mapping(),
             &vec![vec![1, 1, 0], vec![0, 1, 4], vec![0, 0, -1]]
@@ -508,10 +534,10 @@ mod tests {
     }
 
     #[test]
-    fn to_interval_checks_dimensions() {
+    fn to_notation_checks_dimensions() {
         let n = notation("2.3");
-        assert!(n.to_interval(&[1, 0, 0]).is_err());
-        assert!(n.to_interval(&[1]).is_err());
+        assert!(n.to_notation(&[1, 0, 0]).is_err());
+        assert!(n.to_notation(&[1]).is_err());
     }
 
     #[test]
@@ -598,12 +624,12 @@ mod tests {
         // The meantone third is a plain E and the archytas seventh a plain Bb,
         // where just intonation needs an accidental on each.
         let meantone = tempered("2.3.5", &[(81, 80)]);
-        assert_eq!(meantone.to_interval(&[0, 0, 1]).unwrap(), vec![0, 4]);
+        assert_eq!(meantone.to_notation(&[0, 0, 1]).unwrap(), vec![0, 4]);
         assert_eq!(note_of(&meantone, 5, 4), "E5");
         assert_eq!(note_of(&meantone, 81, 64), "E5");
 
         let archytas = tempered("2.3.7", &[(64, 63)]);
-        assert_eq!(archytas.to_interval(&[0, 0, 1]).unwrap(), vec![4, -2]);
+        assert_eq!(archytas.to_notation(&[0, 0, 1]).unwrap(), vec![4, -2]);
         assert_eq!(note_of(&archytas, 7, 4), "Bb5");
         assert_eq!(note_of(&archytas, 16, 9), "Bb5");
     }
@@ -611,10 +637,12 @@ mod tests {
     #[test]
     fn only_tempered_accidentals_are_dropped() {
         // Marvel tempers out 225/224, which is neither accidental, so both stay
-        // and the notation is the just intonation one.
+        // and the notation spells as the just intonation one does. The two are
+        // not equal, since each carries the temperament it notates.
         let marvel = tempered("2.3.5.7", &[(225, 224)]);
         assert_eq!(marvel.rank(), 4);
-        assert_eq!(marvel, notation("2.3.5.7"));
+        assert_eq!(marvel.mapping(), notation("2.3.5.7").mapping());
+        assert_ne!(marvel.temperament(), notation("2.3.5.7").temperament());
 
         // Septimal meantone tempers out 81/80 as well, dropping just that one.
         let n = tempered("2.3.5.7", &[(81, 80), (225, 224)]);
@@ -629,7 +657,10 @@ mod tests {
         // a rank 1 temperament, which is what leaves C# and Db to differ.
         let subgroup = Subgroup::p_limit(5);
         let n = Notation::from_temperament(&Temperament::et(12, &subgroup).unwrap()).unwrap();
-        assert_eq!(n, tempered("2.3.5", &[(81, 80)]));
+        // The notations differ only in the temperament they carry.
+        let meantone = tempered("2.3.5", &[(81, 80)]);
+        assert_eq!(n.mapping(), meantone.mapping());
+        assert_eq!(n.generators(), meantone.generators());
         assert_eq!(note_of(&n, 5, 4), "E5");
     }
 
@@ -835,7 +866,7 @@ mod tests {
             let options = options_of(subgroup, commas);
             for pair in options.windows(2) {
                 for comma in pair[1].commas() {
-                    assert_eq!(pair[0].to_interval(comma).unwrap(), vec![0; pair[0].rank()]);
+                    assert_eq!(pair[0].to_notation(comma).unwrap(), vec![0; pair[0].rank()]);
                 }
             }
         }
@@ -953,14 +984,14 @@ mod tests {
         assert_eq!(ranks(&options), vec![2]);
 
         let n = &options[0];
-        let enharmonics = n.enharmonics(&t).unwrap();
+        let enharmonics = n.enharmonics().unwrap();
         assert_eq!(enharmonics.len(), 1);
         assert_eq!(
             subgroup.to_ratio(&enharmonics[0]).unwrap(),
             (531441, 524288)
         );
         // Twelve fifths less seven octaves, in notation coordinates.
-        assert_eq!(n.to_interval(&enharmonics[0]).unwrap(), vec![-7, 12]);
+        assert_eq!(n.to_notation(&enharmonics[0]).unwrap(), vec![-7, 12]);
     }
 
     #[test]
@@ -972,12 +1003,12 @@ mod tests {
         let t = Temperament::et(22, &subgroup).unwrap();
         let options = Notation::options(&t).unwrap();
 
-        assert_eq!(options[0].enharmonics(&t).unwrap().len(), 1);
+        assert_eq!(options[0].enharmonics().unwrap().len(), 1);
         let coordinates: Vec<Vec<i64>> = options[1]
-            .enharmonics(&t)
+            .enharmonics()
             .unwrap()
             .iter()
-            .map(|e| options[1].to_interval(e).unwrap())
+            .map(|e| options[1].to_notation(e).unwrap())
             .collect();
         assert_eq!(coordinates, vec![vec![0, 1, -13], vec![1, 0, -22]]);
 
@@ -988,11 +1019,11 @@ mod tests {
             let subgroup: Subgroup = subgroup.parse().unwrap();
             let t = Temperament::et(divisions, &subgroup).unwrap();
             for n in &Notation::options(&t).unwrap() {
-                let enharmonics = n.enharmonics(&t).unwrap();
+                let enharmonics = n.enharmonics().unwrap();
                 assert_eq!(enharmonics.len(), n.rank() - t.rank());
                 for e in &enharmonics {
                     assert_eq!(t.map(e).unwrap(), vec![0; t.rank()]);
-                    assert!(n.to_interval(e).unwrap().iter().any(|&x| x != 0));
+                    assert!(n.to_notation(e).unwrap().iter().any(|&x| x != 0));
                 }
             }
         }
@@ -1007,14 +1038,6 @@ mod tests {
         let t = Temperament::from_commas(&commas, &subgroup).unwrap();
         let n = &Notation::options(&t).unwrap()[0];
         assert_eq!(n.rank(), t.rank());
-        assert!(n.enharmonics(&t).unwrap().is_empty());
-    }
-
-    #[test]
-    fn enharmonics_need_the_matching_subgroup() {
-        let n = notation("2.3.5");
-        let other: Subgroup = "2.3.7".parse().unwrap();
-        let t = Temperament::et(12, &other).unwrap();
-        assert!(n.enharmonics(&t).is_err());
+        assert!(n.enharmonics().unwrap().is_empty());
     }
 }

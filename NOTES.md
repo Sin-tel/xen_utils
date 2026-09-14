@@ -330,7 +330,7 @@ rank(ker notation) + rank(enharmonics) == dim - rank(temperament)
 ```
 
 `Notation::enharmonics(temperament)` is `kernel_left` of the generator images,
-returned as interval vectors so that it matches `commas()`. `to_interval` puts
+returned as interval vectors so that it matches `commas()`. `to_notation` puts
 one back in notation coordinates, and that is the form worth reading: 22et's
 rank 3 notation gives `[0, 1, -13]` and `[1, 0, -22]`, i.e. its fifth is thirteen
 ups and its octave twenty two - the whole of ups and downs in 22et, which the
@@ -349,20 +349,64 @@ is the pythagorean comma, 7et's the apotome, 5et's the limma. That is the
 - `search.rs` - everything behind `Notation::options`. `Search` holds the
   temperament, the accidentals and their images; `Plan` is how it sorts them into
   necessary, optional and never kept. Tested through `options`.
+- `simplify.rs` - `Simplifier`: the comma lattice reduced once, then a seeded
+  walk per interval. `cargo run --example simplify` walks 41et.
 - `util.rs` - integer vector helpers, with no music in them.
+
+## Simplifying
+
+Which interval a tempered pitch "is" is a closest vector problem on the
+temperament's comma lattice, and three things about it took working out.
+
+**Which lattice.** Not the enharmonic lattice - that stays inside the lattice the
+notation's generators span, which for 41et's recommended notation is only
+`{2, 3, 5}`, so it can never answer `7/4` and says `225/128` instead. The whole
+comma lattice is what is wanted, and `commas + enharmonics = ker(temperament)`
+exactly, checked over 636 notations. So simplifying depends on the temperament
+alone and the notation only spells the answer.
+
+**Which basis.** Wilson and Tenney weight *prime exponents*, so the search has to
+happen in just intonation coordinates. Weighting notation coordinates instead is
+meaningless: there is no prime on the fifth axis. That is also why `to_notation`
+and `to_just` are named as they are now - both bases are in play at once and
+"interval" for the notation side had become unreadable.
+
+**Which norm.** Wilson is an **L1** norm - `sopfr`, the sum of the prime factors
+of numerator and denominator. The quadratic form the lattice algorithms take is
+only a proxy for it, and the two disagree: under L2 a step of 41et is `45/44`,
+spelled `vvvC#`, where under L1 it is `64/63` at `^C`. So LLL and `cvp_exact`
+seed the search and a bounded walk finishes it under `sopfr`. Ties are settled by
+the quadratic norm and then by the coordinates, so the answer never depends on
+the order the ball is walked in.
+
+What comes out for 41et is the interval table anyone would write by hand: `8/7`,
+`7/6`, `6/5`, `5/4`, `9/7`, `4/3`, `7/5`, `3/2`, `8/5`, `5/3`, `7/4`, `15/8`.
+
+Two things were tried and are settled.
+
+**Leaving the octave out of the cost is wrong.** Free powers of two let the
+search buy any number of them to avoid one high prime, which inverts exactly the
+identifications wanted: 41et's `14/11` becomes `81/64`, `9/7` becomes `32/25`,
+`7/5` becomes `45/32` and `11/7` becomes `128/81`. Octave equivalence is a
+reasonable thing to want elsewhere, but `sopfr` is a statement about the ratio
+and the 2s are part of the ratio.
+
+**`nearest_plane` would do as a seed, and would not help.** Its seed differs from
+`cvp_exact`'s on 4700 of 59109 targets, and the walk converges to the same answer
+every time for anything within nineteen generators of the unison - the ten that
+differ are the same twenty-octaves-out stalls the radius has. But the seed is
+1.6% of the running time and the walk is the rest, so swapping it saves 0.6% of
+nothing. Worth remembering if the lattice ever gets big enough for `cvp_exact`'s
+enumeration to bite, since the walk does not need an exact seed.
 
 ## Loose ends and known limits
 
-- **`simplify` is not started.** The pieces it needs are in place: the
-  enharmonic lattice is `Notation::enharmonics`, and reduction is
-  a small closest-vector problem in a metric that ignores the octave
-  coordinate. `diophantine` has `lll`, `nearest_plane` and `cvp_exact`; a
-  bounded box search after reduction also works and takes an arbitrary cost
-  function, which matters because the natural cost is not quadratic (an
-  asymmetric nominal window, accidentals weighted against sharps). It now has
-  real work waiting for it: the bottom notation of a large equal temperament
-  spells `11/8` as `D###`, and kernel nesting guarantees such a spelling can be
-  reduced onto the one the notation above it gives.
+- **The simplifier is a local search, not a proof.** `Simplifier` reduces the
+  temperament's comma lattice once, takes the `cvp_exact` answer as a seed, and
+  then walks it under the norm actually wanted. It agrees with a wider step for
+  every interval within nineteen generators of the unison, over 59109 swept; the
+  stalls past that are twenty octaves out, where the norm is minimized by
+  trading a pile of one prime for a pile of another. See `SEARCH_RADIUS`.
 - **Derived `PartialEq` on `Notation` compares the stored comma basis**, so two
   notations with the same mapping built from different bases of the same kernel
   compare unequal. Nothing relies on it any more now that `options` builds the

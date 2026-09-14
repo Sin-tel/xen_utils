@@ -59,7 +59,7 @@ fn show(name: &str, t: &Temperament) {
             .iter()
             .map(|c| ratio(subgroup, c))
             .collect();
-        let enharmonics: Vec<String> = reduced(subgroup, &n.enharmonics(t).unwrap())
+        let enharmonics: Vec<String> = reduced(subgroup, &n.enharmonics().unwrap())
             .iter()
             .map(|e| ratio(subgroup, e))
             .collect();
@@ -71,7 +71,7 @@ fn show(name: &str, t: &Temperament) {
                 format!(
                     "{} {}",
                     ratio(subgroup, &harmonic),
-                    n.note(&n.to_interval(&harmonic).unwrap())
+                    n.note(&n.to_notation(&harmonic).unwrap())
                 )
             })
             .collect();

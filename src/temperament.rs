@@ -1,6 +1,6 @@
 //! Regular temperaments as integer linear maps.
 
-use diophantine::{Matrix, kernel_left, kernel_right, lll, saturation, transpose};
+use diophantine::{Matrix, eye, kernel_left, kernel_right, lll, saturation, transpose};
 
 use crate::Error;
 use crate::primes::{Subgroup, Weighting};
@@ -45,6 +45,17 @@ impl Temperament {
             mapping,
             subgroup: subgroup.clone(),
         })
+    }
+
+    /// Builds just intonation over `subgroup`: the temperament that tempers
+    /// nothing out, whose mapping is the identity and whose rank is the rank of
+    /// the subgroup.
+    ///
+    /// # Errors
+    /// Returns [`Error::InvalidDimensions`] if the identity is somehow not a
+    /// valid mapping over `subgroup`.
+    pub fn just(subgroup: &Subgroup) -> Result<Self, Error> {
+        Temperament::from_mapping(&eye(subgroup.dim()), subgroup)
     }
 
     /// Builds the temperament over `subgroup` obtained by tempering out the

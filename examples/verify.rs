@@ -88,14 +88,14 @@ fn check(name: &str, t: &Temperament) -> usize {
         for (position, generator) in n.generators().iter().enumerate() {
             let mut unit = vec![0; n.rank()];
             unit[position] = 1;
-            if n.to_interval(generator).unwrap() != unit {
+            if n.to_notation(generator).unwrap() != unit {
                 fail(format!(
                     "option {index}: generator {position} is not its unit vector"
                 ));
             }
         }
         for comma in n.commas() {
-            if n.to_interval(comma).unwrap().iter().any(|&x| x != 0) {
+            if n.to_notation(comma).unwrap().iter().any(|&x| x != 0) {
                 fail(format!("option {index}: a comma is not in the kernel"));
             }
             if t.map(comma).unwrap().iter().any(|&x| x != 0) {
@@ -112,7 +112,7 @@ fn check(name: &str, t: &Temperament) -> usize {
 
         // What the notation spells alike and what it still spells apart have to
         // account between them for everything the temperament tempers out.
-        let enharmonics = n.enharmonics(t).unwrap();
+        let enharmonics = n.enharmonics().unwrap();
         let tempered = n.dim() - t.rank();
         if n.commas().len() + enharmonics.len() != tempered {
             fail(format!(
@@ -127,7 +127,7 @@ fn check(name: &str, t: &Temperament) -> usize {
                     "option {index}: the enharmonic {enharmonic:?} is not tempered out"
                 ));
             }
-            if n.to_interval(enharmonic).unwrap().iter().all(|&x| x == 0) {
+            if n.to_notation(enharmonic).unwrap().iter().all(|&x| x == 0) {
                 fail(format!(
                     "option {index}: the enharmonic {enharmonic:?} is spelled as a unison"
                 ));
@@ -140,7 +140,7 @@ fn check(name: &str, t: &Temperament) -> usize {
     for (index, pair) in options.windows(2).enumerate() {
         let (smaller, larger) = (&pair[0], &pair[1]);
         for comma in larger.commas() {
-            if smaller.to_interval(comma).unwrap().iter().any(|&x| x != 0) {
+            if smaller.to_notation(comma).unwrap().iter().any(|&x| x != 0) {
                 fail(format!(
                     "option {index} does not contain the kernel of option {}",
                     index + 1
