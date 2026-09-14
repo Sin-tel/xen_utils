@@ -456,6 +456,11 @@ enumeration to bite, since the walk does not need an exact seed.
   over the temperament list and over every equal temperament to 99 in the 5, 7
   and 11-limit, so nothing turns on it yet, and the fallback may well go away
   entirely.
-- **Whether `225/224` may be an accidental** was left open. Nothing enforces
-  the `{2, 3, p}` support rule, because accidentals are derived rather than
-  given, and the derivation cannot produce anything else.
+- **Whether `225/224` may be an accidental: resolved, no.** The `{2, 3, p}`
+  support rule is a real constraint, not just an accident of how accidentals
+  are derived. Everything hangs off a prime having exactly one accidental -
+  `Search`'s necessary/optional/passed-over classification, the comma
+  substitution being triangular, symbols keyed to a prime - and that structure
+  is worth more than what a multi-prime accidental like `225/224` would buy.
+  Nothing stops it existing in principle, but the search as built would never
+  find one, and that is not worth changing.
