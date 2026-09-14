@@ -85,13 +85,35 @@ impl Simplifier {
     /// Returns [`Error::InvalidDimensions`] if `interval` does not have one
     /// entry per basis element of the subgroup.
     pub fn simplify(&self, interval: &[i64]) -> Result<Vec<i64>, Error> {
-        self.simplify_within(interval, SEARCH_RADIUS)
+        Ok(self
+            .simplify_within(interval, SEARCH_RADIUS)?
+            .swap_remove(0))
+    }
+
+    /// The simplest `count` just intervals the temperament makes equal to
+    /// `interval`, simplest first, for an end user to cycle through.
+    ///
+    /// The walk passes over every one of these on its way, so they cost nothing
+    /// beyond keeping them. What comes back is everything it saw, sorted, which
+    /// is the ball it settled in and the balls it walked through to get there -
+    /// a few thousand intervals for an equal temperament of the 11 limit. That
+    /// is a neighbourhood rather than the whole coset, so it is the right end of
+    /// the list that is worth trusting, and asking for more than a handful will
+    /// eventually run out of sensible answers before it runs out of intervals.
+    ///
+    /// # Errors
+    /// Returns [`Error::InvalidDimensions`] if `interval` does not have one
+    /// entry per basis element of the subgroup.
+    pub fn candidates(&self, interval: &[i64], count: usize) -> Result<Matrix<i64>, Error> {
+        let mut found = self.simplify_within(interval, SEARCH_RADIUS)?;
+        found.truncate(count);
+        Ok(found)
     }
 
     /// [`simplify`](Self::simplify), stepping by a ball of the given radius
     /// rather than the one [`SEARCH_RADIUS`] fixes. This is what the radius is
     /// chosen by.
-    fn simplify_within(&self, interval: &[i64], radius: i64) -> Result<Vec<i64>, Error> {
+    fn simplify_within(&self, interval: &[i64], radius: i64) -> Result<Matrix<i64>, Error> {
         if interval.len() != self.subgroup.dim() {
             return Err(Error::InvalidDimensions(format!(
                 "interval has {} entries, expected {}",
@@ -100,7 +122,7 @@ impl Simplifier {
             )));
         }
         if self.lattice.is_empty() {
-            return Ok(interval.to_vec());
+            return Ok(vec![interval.to_vec()]);
         }
 
         let seed = subtract(
@@ -111,15 +133,17 @@ impl Simplifier {
     }
 
     /// Steps from `seed` to the nearest simpler interval until there is none,
-    /// looking `radius` along each reduced basis vector at a time.
+    /// looking `radius` along each reduced basis vector at a time, and returns
+    /// everything it passed over, simplest first.
     ///
     /// Ties under [`sopfr`] are common, since swapping which primes carry the
     /// interval often costs nothing; the quadratic norm settles most of them and
-    /// the coordinates themselves settle the rest, so that the answer never
+    /// the coordinates themselves settle the rest, so that the order never
     /// depends on the order the ball is walked in.
-    fn search(&self, seed: &[i64], radius: i64) -> Vec<i64> {
+    fn search(&self, seed: &[i64], radius: i64) -> Matrix<i64> {
         let width = (2 * radius + 1) as usize;
         let mut best = seed.to_vec();
+        let mut seen = Vec::new();
 
         // Every round strictly lowers the key, which cannot go on for ever, so
         // this terminates whatever the radius.
@@ -140,26 +164,31 @@ impl Simplifier {
                     &combination(&counts, &self.lattice, self.subgroup.dim()),
                 );
                 if self.key(&candidate) < self.key(&improved) {
-                    improved = candidate;
+                    improved.clone_from(&candidate);
                 }
+                seen.push((self.key(&candidate), candidate));
             }
             if improved == best {
-                return best;
+                break;
             }
             best = improved;
         }
+
+        seen.sort_unstable();
+        seen.dedup();
+        seen.into_iter().map(|(_, interval)| interval).collect()
     }
 
     /// What the search minimizes: the Wilson norm, the quadratic norm standing
     /// in for it as a tie-break, and the coordinates to settle the rest.
-    fn key<'a>(&self, interval: &'a [i64]) -> (i64, i64, &'a [i64]) {
+    fn key(&self, interval: &[i64]) -> (i64, i64, Vec<i64>) {
         let primes = self.subgroup.basis();
         let squared = interval
             .iter()
             .zip(primes)
             .map(|(&e, &p)| i64::from(p) * i64::from(p) * e * e)
             .sum();
-        (sopfr(interval, primes), squared, interval)
+        (sopfr(interval, primes), squared, interval.to_vec())
     }
 }
 
@@ -267,7 +296,7 @@ mod tests {
         // Under the quadratic norm the seed really is the undecimal comma, so
         // it is the walk that is doing this, not the reduction.
         let seed = simplifier.simplify_within(&stack(&notation, 1), 0).unwrap();
-        assert_eq!(notation.subgroup().to_ratio(&seed).unwrap(), (45, 44));
+        assert_eq!(notation.subgroup().to_ratio(&seed[0]).unwrap(), (45, 44));
     }
 
     #[test]
@@ -281,11 +310,11 @@ mod tests {
             let primes = notation.subgroup().basis();
             let ratio = |interval: &[i64]| notation.subgroup().to_ratio(interval).unwrap();
             assert_eq!(
-                ratio(&simplifier.simplify_within(&far, 1).unwrap()),
+                ratio(&simplifier.simplify_within(&far, 1).unwrap()[0]),
                 (1, 34560)
             );
             assert_eq!(
-                ratio(&simplifier.simplify_within(&far, 2).unwrap()),
+                ratio(&simplifier.simplify_within(&far, 2).unwrap()[0]),
                 (1, 39366)
             );
             assert_eq!(sopfr(&[-8, 3, 1, 0], primes), 30);
@@ -308,8 +337,8 @@ mod tests {
             for ups in -30..=60 {
                 let stacked = stack(&notation, ups);
                 assert_eq!(
-                    simplifier.simplify_within(&stacked, 3).unwrap(),
-                    simplifier.simplify_within(&stacked, 2).unwrap(),
+                    simplifier.simplify_within(&stacked, 3).unwrap()[0],
+                    simplifier.simplify_within(&stacked, 2).unwrap()[0],
                     "{divisions}et over {subgroup}, {ups} ups: a wider step moved the answer"
                 );
             }
@@ -360,6 +389,40 @@ mod tests {
             let simplifier = Simplifier::new(option).unwrap();
             assert_eq!(simplifier.simplify(&interval).unwrap(), simplest);
         }
+    }
+
+    #[test]
+    fn the_candidates_are_ranked_readings_of_one_pitch() {
+        // Fifteen steps of 41et, where the simplest reading is not the most
+        // convenient spelling: 9/7 costs three marks and means something, and
+        // the runner up is spelled no better and means much less.
+        let (notation, simplifier) = simplifier(41, "2.3.5.7.11");
+        let subgroup = notation.subgroup();
+        let target = stack(&notation, 15);
+
+        let candidates = simplifier.candidates(&target, 3).unwrap();
+        let ratios: Vec<(u64, u64)> = candidates
+            .iter()
+            .map(|candidate| subgroup.to_ratio(candidate).unwrap())
+            .collect();
+        assert_eq!(ratios, vec![(9, 7), (32, 25), (35, 27)]);
+
+        // The first is what simplifying gives, the rest are ranked behind it,
+        // and every one of them is the same pitch to the temperament.
+        assert_eq!(candidates[0], simplifier.simplify(&target).unwrap());
+        let pitch = notation.temperament().map(&target).unwrap();
+        let mut norms = Vec::new();
+        for candidate in simplifier.candidates(&target, usize::MAX).unwrap() {
+            assert_eq!(notation.temperament().map(&candidate).unwrap(), pitch);
+            norms.push(sopfr(&candidate, subgroup.basis()));
+        }
+        assert!(norms.windows(2).all(|pair| pair[0] <= pair[1]));
+
+        // The walk sees a few hundred of them, so asking for a handful is free
+        // and asking for more than there are gives what there is.
+        assert_eq!(norms.len(), 625);
+        assert_eq!(simplifier.candidates(&target, 900).unwrap().len(), 625);
+        assert_eq!(simplifier.candidates(&target, 0).unwrap().len(), 0);
     }
 
     #[test]

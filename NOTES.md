@@ -382,6 +382,19 @@ the order the ball is walked in.
 What comes out for 41et is the interval table anyone would write by hand: `8/7`,
 `7/6`, `6/5`, `5/4`, `9/7`, `4/3`, `7/5`, `3/2`, `8/5`, `5/3`, `7/4`, `15/8`.
 
+**The answer is the first of a list.** The walk passes over every interval in
+every ball it steps through, so keeping them costs nothing and `candidates`
+returns them sorted - 625 to 750 of them for an equal temperament of the 11
+limit. That is a neighbourhood rather than the whole coset, so only the right end
+of the list means anything, but the right end is what an end user cycles through.
+`cargo run --example candidates` shows the four steps of 41et where the simplest
+reading is not the most convenient spelling.
+
+One thing to decide there: candidates are distinct *intervals*, and several of
+them can share a spelling - at 14 steps both `81/64` and `80/63` are `E5`, since
+they differ by a comma the notation tempers out. Right for cycling through
+readings, noise for cycling through spellings.
+
 Two things were tried and are settled.
 
 **Leaving the octave out of the cost is wrong.** Free powers of two let the
