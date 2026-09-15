@@ -17,6 +17,7 @@
 //! spellings of a pitch differ by an element of it, whichever notation produced
 //! them.
 
+use diophantine::{Matrix, hnf};
 use xen_utils::{Notation, Simplifier, Subgroup, Temperament};
 
 fn main() {
@@ -54,9 +55,13 @@ fn main() {
                     .join(" ")
             }
         );
-        println!("    enharmonics, in notation coordinates:");
-        for e in n.enharmonics().expect("an enharmonic lattice") {
-            println!("        {:?}", n.to_notation(&e).expect("an enharmonic"));
+        println!("    kernel, in hermite normal form (what it spells alike):");
+        for row in normal(n.commas()) {
+            println!("        {row:?}");
+        }
+        println!("    enharmonics, in notation coordinates, hermite normal form:");
+        for row in normal(&enharmonics(n)) {
+            println!("        {row:?}");
         }
     }
 
@@ -67,6 +72,8 @@ fn main() {
     println!("\n{:>4}  {:>9}  {}", "step", "simplest", header.join(""));
 
     let mut totals = vec![(0i64, 0i64); options.len()];
+    let mut coset = (0i64, 0i64);
+    let mut symbols = (0i64, 0i64);
     for step in 0..=divisions {
         let target = scaled(&subgroup, &temperament, step, divisions);
         let simplified = simplifier.simplify(&target).expect("a simplification");
@@ -86,10 +93,35 @@ fn main() {
                 )
             })
             .collect();
+        // The same pitch, spelled by searching the coset in the recommended
+        // notation rather than by mapping the interval.
+        let seed = recommended
+            .to_notation(&simplified)
+            .expect("a just interval");
+        let lattice = enharmonics(&recommended);
+        let by_marks = best(&seed, &lattice, |marks, sharps| (marks, sharps));
+        let by_symbols = best(&seed, &lattice, |marks, sharps| (marks + sharps, marks));
+        coset.0 += cost(&by_marks).0;
+        coset.1 += cost(&by_marks).1;
+        symbols.0 += cost(&by_symbols).0;
+        symbols.1 += cost(&by_symbols).1;
+
         println!(
-            "{step:4}  {:>9}  {}",
+            "{step:4}  {:>9}  {}{:14}{:14}",
             ratio(&subgroup, &simplified),
-            cells.join("")
+            cells.join(""),
+            format!(
+                "{} {}/{}",
+                recommended.note(&by_marks),
+                cost(&by_marks).0,
+                cost(&by_marks).1
+            ),
+            format!(
+                "{} {}/{}",
+                recommended.note(&by_symbols),
+                cost(&by_symbols).0,
+                cost(&by_symbols).1
+            )
         );
     }
 
@@ -97,7 +129,61 @@ fn main() {
         .iter()
         .map(|(marks, sharps)| format!("{:14}", format!("{marks} marks {sharps} sh")))
         .collect();
-    println!("{:4}  {:>9}  {}", "", "totals", summary.join(""));
+    println!(
+        "{:4}  {:>9}  {}{:14}{:14}",
+        "",
+        "totals",
+        summary.join(""),
+        format!("{} marks {} sh", coset.0, coset.1),
+        format!("{} marks {} sh", symbols.0, symbols.1)
+    );
+}
+
+/// What a spelling costs to write: its accidental marks, and its sharps or
+/// flats. Seven fifths are a sharp, and a fifth coordinate from -1 to 5 is the
+/// range that needs none.
+fn cost(coordinates: &[i64]) -> (i64, i64) {
+    (
+        coordinates[2..].iter().map(|c| c.abs()).sum(),
+        (coordinates[1] + 1).div_euclid(7).abs(),
+    )
+}
+
+/// The cheapest spelling of the pitch `seed` spells, searched over its coset of
+/// the enharmonic lattice. Ties are settled by the coordinates so that the
+/// answer does not depend on the order the box is walked in.
+fn best<K: Ord>(seed: &[i64], lattice: &Matrix<i64>, key: impl Fn(i64, i64) -> K) -> Vec<i64> {
+    const WIDTH: i64 = 6;
+    let rank = lattice.len();
+    let mut chosen = seed.to_vec();
+    let mut steps = vec![-WIDTH; rank];
+    loop {
+        let candidate: Vec<i64> = (0..seed.len())
+            .map(|slot| {
+                seed[slot]
+                    + steps
+                        .iter()
+                        .zip(lattice)
+                        .map(|(&step, row)| step * row[slot])
+                        .sum::<i64>()
+            })
+            .collect();
+        let (marks, sharps) = cost(&candidate);
+        let (best_marks, best_sharps) = cost(&chosen);
+        if (key(marks, sharps), candidate.clone()) < (key(best_marks, best_sharps), chosen.clone())
+        {
+            chosen = candidate;
+        }
+        let mut place = 0;
+        while place < rank && steps[place] == WIDTH {
+            steps[place] = -WIDTH;
+            place += 1;
+        }
+        if place == rank {
+            return chosen;
+        }
+        steps[place] += 1;
+    }
 }
 
 /// Some just interval worth `step` steps, for the simplifier to reduce. Any one
@@ -126,6 +212,25 @@ fn scaled(subgroup: &Subgroup, t: &Temperament, step: i64, divisions: i64) -> Ve
         }
     }
     unreachable!("the fifth chain reaches every step of a notatable equal temperament")
+}
+
+/// A lattice in hermite normal form, which is the only way to tell two of them
+/// apart: a basis is not canonical and two different ones can span the same
+/// lattice.
+fn normal(lattice: &Matrix<i64>) -> Matrix<i64> {
+    if lattice.is_empty() {
+        return Vec::new();
+    }
+    hnf(lattice).expect("a lattice basis")
+}
+
+/// The enharmonic lattice in notation coordinates.
+fn enharmonics(n: &Notation) -> Matrix<i64> {
+    n.enharmonics()
+        .expect("an enharmonic lattice")
+        .iter()
+        .map(|e| n.to_notation(e).expect("an enharmonic"))
+        .collect()
 }
 
 fn ratio(subgroup: &Subgroup, interval: &[i64]) -> String {

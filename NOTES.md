@@ -413,6 +413,108 @@ That column is thin - 43 commas - and thin is the honest state of the evidence.
 Lengthening the named list, especially at rank 2 and rank 3, is what would fill
 it in.
 
+## What a notation decides, and what it cannot
+
+Worth settling, because it bounds what the search is for.
+
+**Compare lattices by Hermite normal form, never by a printed basis.** A basis is
+not canonical and two different ones span the same lattice. Everything below is
+an HNF comparison.
+
+### Two notations with the same generators share their enharmonics
+
+Take 41et over `2.3.5.7.11` and its rank 3 notation, derived once as the code
+does it and once with step 1 disabled so the simplest comma runs everywhere.
+Both keep the octave, the fifth and `81/80`. Then the map `t` from notation
+coordinates down to pitches is determined by where those three generators go,
+which is the same for both - so `E = ker t` is the same lattice, and it is:
+
+```
+[1, 0, -41]      the octave is 41 ups
+[0, 1, -24]      the fifth is 24 ups
+```
+
+identical for both, in HNF. The same holds for 31et. So as **symbol systems** -
+what marks exist, what each is worth, which written notes name one pitch - the
+two are the same, and any two spellings of a pitch differ by an element of `E`
+whichever notation produced them.
+
+### But their kernels differ, so they are not the same map
+
+```
+derived:          [1, 15, -5, -1, -3]      [0, 52, -17, -3, -10]
+simplest comma:   [1,  2, -6,  1,  2]      [0,  6, -14,  2,   5]
+```
+
+Different lattices in HNF. Since `ker N + E = ker T` and `E` is shared, the
+difference is entirely in `ker N` - **which just intervals the notation spells
+alike**. A notation is not only a set of symbols; it is a map from intervals to
+them, and that map is what the commas choose.
+
+### The pitch question and the interval question
+
+These are different questions and only one of them is the notation's.
+
+- **Asked for a pitch**, the notation decides nothing. 12et's second step may be
+  `D`, `Ebb` or `C##` and nothing in the notation prefers one. That is a coset of
+  `E` and it needs a rule of its own.
+- **Asked for an interval**, the notation decides everything, and the answer
+  carries the harmonic reading the temperament discarded. In 12et, still with no
+  freedom at all in its kernel:
+
+```
+16/15  -> Db        25/24  -> C#        135/128 -> C#
+ 9/8   -> D         10/9   -> D
+```
+
+  One step, two spellings, and the notation tells them apart because it was
+  asked about intervals. `cargo run --example spell` is that table.
+
+The pitch question is already answered upstream, by composing the two: 12et's
+second step simplifies to `9/8` and so is written `D`; its first simplifies to
+`16/15` and so is written `Db`, not `C#`. That is the right place for it.
+
+### Choosing the spelling from the coset instead does not work
+
+If the spelling were picked from the coset of `E` by counting symbols, the comma
+choice could not affect it at all - both notations offer the same coset. It is
+cheaper on the page: over 41et it costs 28 marks against the derived notation's
+33. And it is wrong, because it answers the pitch question while the simplifier
+is answering the interval question, and the two then disagree:
+
+```
+step 14   simplest 14/11   derived vdF   coset E
+step 27   simplest 11/7    derived ^tG   coset Ab
+```
+
+A reading of `14/11` displayed as a plain `E` is a pythagorean third on the page
+and an undecimal one in the analysis. The spelling has to be a function of the
+interval, and that function is `N`. `cargo run --example table` prints both
+columns.
+
+### So what the search is for
+
+- **Which accidentals to keep** - tempered out, passed over, necessary,
+  optional. This picks the generators, hence `t`, hence `E`: it chooses the
+  symbol system itself. Nothing downstream can do this and it is the bulk of
+  `Search`.
+- **The run and the recommendation**, which are built on that.
+- **The commas**, which pick `N` out of the maps compatible with that system.
+  Load-bearing, but only on the primes the kept generators do not already span -
+  for 41et's rank 3 notation the 5-limit is spanned, so `5/4` is forced to `vE`
+  and only `7` and `11` are chosen. This is a smaller job than the code implies,
+  which is what the earlier measurement showed: dropping the preference order
+  entirely moved 17 of 912 lines.
+
+### The gap this leaves
+
+Nothing offers the **other spellings of a pitch**. `Notation::enharmonics` gives
+the lattice and `verify` checks it, but there is no way to ask for `Ebb` and
+`C##` once `D` has been returned, which is the one thing a notation genuinely
+cannot decide and a caller genuinely wants to cycle. `candidates` cycles
+*readings* - distinct intervals - and is the wrong axis for it, as its own note
+already says.
+
 ## Which notation to recommend
 
 `from_temperament` no longer takes an end of the run. It returns **the smallest
