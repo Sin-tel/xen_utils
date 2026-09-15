@@ -362,6 +362,31 @@ symbols rather than by preferring low primes, which is both shorter to state and
 better where it differs. `a_stack_is_the_shortest_one_that_works` pins 72et
 down.
 
+### Sweeping equal temperaments proves less than it looks
+
+An equal temperament sweep is a **coverage test, not a judgement**. Temperaments
+can be arbitrarily bad and most of the ones a sweep turns up are nobody's
+notation, so the sweep is worth having for panics and for diffing a rule change
+and worth nothing for deciding whether an answer is sensible. The interesting
+cases are rank 2 and up.
+
+Counting the same fifth chain walks with rank 1 and the higher ranks apart makes
+the difference plain. Over `data/temperaments_big.txt` plus every equal
+temperament to 99, of 43 commas from rank 2 and up:
+
+- **25 never touch the chain at all**, so they are step 1;
+- the other **18 land on 5, 7, 12 or 19 fifths** - the limma, the apotome, the
+  pythagorean comma and the next convergent - and nowhere else.
+
+The odd rows in the table, 2 fifths at a whole tone and 3 at a minor third and
+26 at a major second, are **equal temperaments only**. So the intuition that a
+step 2 comma always respells a prime onto a near-closure of the fifth chain is
+exactly right where it matters, and the noise was coming from the sweep.
+
+That column is thin - 43 commas - and thin is the honest state of the evidence.
+Lengthening the named list, especially at rank 2 and rank 3, is what would fill
+it in.
+
 ## Which notation to recommend
 
 `from_temperament` no longer takes an end of the run. It returns **the smallest
@@ -448,6 +473,12 @@ is the pythagorean comma, 7et's the apotome, 5et's the limma. That is the
   choice and `Search::simplest_comma` is step 2. Tested through `options`.
 - `simplify.rs` - `Simplifier`: the comma lattice reduced once, then a seeded
   walk per interval. `cargo run --example simplify` walks 41et.
+- `cargo run --example trace` - the derivation of one temperament, a step at a
+  time, with every replacement that works listed and the one taken marked.
+  Defaults to 72et and takes any name in `data/temperaments_big.txt`. It reads
+  the answer back out of `Notation::options` rather than re-deriving it, and
+  asserts that everything it lists is worth what the accidental is worth, so it
+  cannot quietly drift from the code.
 - `util.rs` - integer vector helpers, with no music in them.
 
 ## Simplifying

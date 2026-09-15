@@ -8,16 +8,23 @@
 //! performs one level down: that one corrects a prime onto the fifth chain with
 //! a small interval, and this one corrects an accidental.
 //!
-//! Only the recommended notation of each temperament is counted. The bottom of
-//! a long run has had every accidental substituted away and walks wherever it
-//! has to; what a caller actually gets handed is the question.
+//! Every notation in every run is counted, not only the recommended one: a
+//! recommendation that keeps all its accidentals has no commas at all, so
+//! counting those alone throws most of rank 2 away and leaves nothing to read.
+//!
+//! Rank 1 and the higher ranks are counted apart. An equal temperament sweep is
+//! a coverage test rather than a judgement - most of what it turns up is
+//! nobody's notation - so the rank 2 and up column is the one that says whether
+//! a walk is a reasonable thing to have done. That column is thin, which is the
+//! honest state of the evidence: the named list is short on rank 2 and rank 3
+//! entries, and lengthening it is the way to fill it in.
 
 use std::collections::BTreeMap;
 use std::error::Error;
 
 use xen_utils::{Notation, Subgroup, Temperament};
 
-const TEMPERAMENTS: &str = include_str!("../data/temperaments.txt");
+const TEMPERAMENTS: &str = include_str!("../data/temperaments_big.txt");
 const SUBGROUPS: [&str; 6] = [
     "2.3.5",
     "2.3.7",
@@ -29,7 +36,7 @@ const SUBGROUPS: [&str; 6] = [
 
 fn main() {
     // Keyed by the fifth count, since that is what names the point on the chain.
-    let mut seen: BTreeMap<i64, (i64, usize, String)> = BTreeMap::new();
+    let mut seen: BTreeMap<i64, Row> = BTreeMap::new();
 
     for (number, line) in TEMPERAMENTS.lines().enumerate() {
         let line = line.split('#').next().unwrap_or_default().trim();
@@ -57,27 +64,43 @@ fn main() {
         }
     }
 
-    let total: usize = seen.values().map(|(_, count, _)| count).sum();
+    let equal: usize = seen.values().map(|row| row.equal).sum();
+    let higher: usize = seen.values().map(|row| row.higher).sum();
     println!(
-        "{:>6}  {:>7}  {:>7}  {:>6}  {:>6}  {:>7}  first seen",
-        "fifths", "octaves", "cents", "letter", "sharps", "commas",
+        "{:>6}  {:>7}  {:>7}  {:>6}  {:>6}  {:>7}  {:>9}  first seen above rank 1",
+        "fifths", "octaves", "cents", "letter", "sharps", "rank 1", "rank 2 up",
     );
-    for (fifths, (octaves, count, example)) in &seen {
-        let cents = (f64::from(3).log2() - 1.0) * 1200.0 * *fifths as f64 + 1200.0 * *octaves as f64;
+    for (fifths, row) in &seen {
+        let cents =
+            (f64::from(3).log2() - 1.0) * 1200.0 * *fifths as f64 + 1200.0 * row.octaves as f64;
         // Seven fifths are a sharp and leave the letter alone, so the letter
         // moves by the fifth count modulo seven and the sharps are the rest.
         let letter = fifths.rem_euclid(7);
         let sharps = fifths.div_euclid(7);
         println!(
-            "{fifths:6}  {octaves:7}  {cents:7.1}  {letter:6}  {sharps:6}  {count:7}  {example}"
+            "{fifths:6}  {:7}  {cents:7.1}  {letter:6}  {sharps:6}  {:7}  {:9}  {}",
+            row.octaves, row.equal, row.higher, row.example
         );
     }
-    println!("
-{total} commas over the recommended notations");
+    println!(
+        "
+{equal} commas from equal temperaments, {higher} from rank 2 and up"
+    );
+}
+
+/// One point on the chain of fifths: its octave count, how many commas landed
+/// on it from a rank 1 temperament and from a higher one, and where it first
+/// turned up above rank 1.
+#[derive(Default)]
+struct Row {
+    octaves: i64,
+    equal: usize,
+    higher: usize,
+    example: String,
 }
 
 /// Records the octave and fifth part of each comma of each notation.
-fn collect(name: &str, t: &Temperament, seen: &mut BTreeMap<i64, (i64, usize, String)>) {
+fn collect(name: &str, t: &Temperament, seen: &mut BTreeMap<i64, Row>) {
     let subgroup = t.subgroup();
     let Ok(ji) = Notation::from_ji(subgroup) else {
         return;
@@ -85,29 +108,29 @@ fn collect(name: &str, t: &Temperament, seen: &mut BTreeMap<i64, (i64, usize, St
     let Ok(options) = Notation::options(t) else {
         return;
     };
-    let Ok(recommended) = Notation::from_temperament(t) else {
-        return;
-    };
     for n in &options {
-        if n.mapping() != recommended.mapping() {
-            continue;
-        }
         for comma in n.commas() {
             let notational = ji.to_notation(comma).unwrap();
             // Normalise the direction, so that a comma and its inverse are one
             // point on the chain rather than two.
-            let (octaves, fifths) = if notational[1] < 0 || (notational[1] == 0 && notational[0] < 0)
-            {
-                (-notational[0], -notational[1])
+            let (octaves, fifths) =
+                if notational[1] < 0 || (notational[1] == 0 && notational[0] < 0) {
+                    (-notational[0], -notational[1])
+                } else {
+                    (notational[0], notational[1])
+                };
+            let entry = seen.entry(fifths).or_default();
+            entry.octaves = octaves;
+            if t.rank() == 1 {
+                entry.equal += 1;
             } else {
-                (notational[0], notational[1])
-            };
-            let entry = seen
-                .entry(fifths)
-                .or_insert_with(|| (octaves, 0, format!("{name} {subgroup} [{}]", n.rank())));
-            entry.1 += 1;
+                entry.higher += 1;
+                if entry.example.is_empty() {
+                    entry.example = format!("{name} {subgroup} [{}]", n.rank());
+                }
+            }
             assert_eq!(
-                entry.0, octaves,
+                entry.octaves, octaves,
                 "{fifths} fifths turned up with two different octave counts"
             );
         }

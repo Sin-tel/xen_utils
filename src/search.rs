@@ -420,7 +420,11 @@ fn shortest_stack(target: &[i64], generators: &Matrix<i64>) -> Option<Vec<i64>> 
     // is nothing to weight them by and nothing being smuggled in.
     let size = freedom[0].len();
     let weights = (0..size)
-        .map(|row| (0..size).map(|col| f64::from(u8::from(row == col))).collect())
+        .map(|row| {
+            (0..size)
+                .map(|col| f64::from(u8::from(row == col)))
+                .collect()
+        })
         .collect();
     let freedom = lll(&freedom, 0.99, &weights).ok()?;
 

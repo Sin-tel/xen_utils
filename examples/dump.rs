@@ -6,12 +6,18 @@
 //! moved - which is the only way to tell whether a simpler rule is the same
 //! rule. The fingerprint is the mapping, the accidentals kept, and how each
 //! prime beyond 3 comes out, since those are what a caller can observe.
+//!
+//! The equal temperament sweep is here for coverage, not for judgement. A
+//! temperament can be arbitrarily bad and plenty of these are; sweeping them
+//! catches a panic or a rule that moved, and says nothing about whether an
+//! answer is sensible. For that, read the named list - and the rank 2 and rank
+//! 3 entries in it especially, which is what anyone actually notates.
 
 use std::error::Error;
 
 use xen_utils::{Notation, Subgroup, Temperament};
 
-const TEMPERAMENTS: &str = include_str!("../data/temperaments.txt");
+const TEMPERAMENTS: &str = include_str!("../data/temperaments_big.txt");
 const SUBGROUPS: [&str; 6] = [
     "2.3.5",
     "2.3.7",
