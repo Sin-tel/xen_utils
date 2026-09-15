@@ -55,14 +55,14 @@ fn main() {
         }
     }
 
-    for subgroup in SUBGROUPS {
-        let subgroup: Subgroup = subgroup.parse().unwrap();
-        for divisions in 5..=99 {
-            if let Ok(t) = Temperament::et(divisions, &subgroup) {
-                collect(&format!("{divisions}et"), &t, &mut seen);
-            }
-        }
-    }
+    // for subgroup in SUBGROUPS {
+    //     let subgroup: Subgroup = subgroup.parse().unwrap();
+    //     for divisions in 5..=99 {
+    //         if let Ok(t) = Temperament::et(divisions, &subgroup) {
+    //             collect(&format!("{divisions}et"), &t, &mut seen);
+    //         }
+    //     }
+    // }
 
     let equal: usize = seen.values().map(|row| row.equal).sum();
     let higher: usize = seen.values().map(|row| row.higher).sum();

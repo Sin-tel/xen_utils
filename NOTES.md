@@ -236,10 +236,36 @@ stack, and the list is thirty entries. Dropping step 2 would make the whole
 derivation metric-free, which is worth wanting - **two metric-free replacements
 for it were tried in the notation basis and both are worse.** See below.
 
-Using the simplest comma *everywhere*, for the record, is clearly wrong: it
-spells 41et's `7/4` as `vvA#` instead of `vBb` and 31et's `11/8` as `vvGb`
-instead of `^F`, because a simpler comma is not the same thing as the intended
-one. The stack has to come first.
+Using the simplest comma *everywhere*, for the record, is clearly wrong. Over
+`2.3.5.7.11` it spells 41et's `7/4` as `vvA#` rather than `vBb` in the rank 3
+notation keeping `81/80`, and 31et's `11/8` as `vvGb` rather than `^F` in the
+one keeping `64/63`. The stack has to come first.
+
+**That comparison was written before the simplifier existed, so it is worth
+saying exactly what it does and does not claim.** Both spellings of each pair
+name the same pitch. Two notations keeping the same generators have the same map
+from notation coordinates down to pitches, hence literally the same enharmonic
+lattice - checked, `[[0, 1, -24], [1, 0, -41]]` for both 41et notations and
+`[[0, 1, -18], [1, 0, -31]]` for both 31et ones - and `vvA#` less `vBb` is
+`[7, -12, 1]`, which is in it. So **neither spelling is unavailable in either
+notation**, and anything cycling spellings reaches both. What the comma decides
+is which one the notation hands back for the just interval, which is what a
+reader actually sees.
+
+Decided that way it still holds, and more strongly than at one prime. Spelling
+every pitch's simplest interval over the whole table (`cargo run --example
+table`):
+
+| notation            | stack first | simplest comma |
+| ------------------- | ----------- | -------------- |
+| 41et `[3]`, `81/80` | 41 marks, 15 sharps | 50 marks, 31 sharps |
+| 31et `[3]`, `64/63` | 20 marks, 12 sharps | 26 marks, 16 sharps |
+
+One honest caveat: at 41et's `[2]`, which keeps nothing, the simplest comma is
+the *better* of the two, 60 sharps against 73, because the substituted commas
+compound differently with nothing to stop them. So "the stack first" is not
+uniformly better across a run - it is better at the notations that keep an
+accidental, which are the ones anyone uses.
 
 Wilson weighting is a metric rather than a tuned weight, and
 `reduced_comma_basis` already uses it, so this is not the weighted cost function

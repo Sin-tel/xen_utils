@@ -268,10 +268,20 @@ impl<'a> Search<'a> {
     /// in 31et, and as one of each in 72et. Failing that, see
     /// [`simplest_comma`](Self::simplest_comma).
     ///
-    /// The stack has to come first: using the simplest comma everywhere spells
-    /// 41et's `7/4` as `vvA#` instead of `vBb` and 31et's `11/8` as `vvGb`
-    /// instead of `^F`, because a simpler comma is not the same as the intended
-    /// one.
+    /// The stack has to come first. Using the simplest comma everywhere, over
+    /// `2.3.5.7.11`, spells 41et's `7/4` as `vvA#` rather than `vBb` in the
+    /// rank 3 notation that keeps `81/80`, and 31et's `11/8` as `vvGb` rather
+    /// than `^F` in the one that keeps `64/63`.
+    ///
+    /// Both of each pair name the same pitch. Two notations keeping the same
+    /// generators have the same map down to pitches and so the same enharmonic
+    /// lattice, and `vvA#` less `vBb` is `[7, -12, 1]`, an enharmonic of 41et.
+    /// So the choice is not which spellings exist - it is which one the
+    /// notation hands back for the just interval, and that is what a reader
+    /// sees. It is a real choice and a systematic one: over the whole table of
+    /// 41et, spelling each pitch's simplest interval, the stack costs 41 marks
+    /// and 15 sharps against the simplest comma's 50 and 31. For 31et it is 20
+    /// and 12 against 26 and 16. `cargo run --example table` is that count.
     fn comma(&self, available: &[usize], index: usize) -> Result<Vec<i64>, Error> {
         // The temperament already spells this accidental as a unison, so there
         // is nothing for it to be replaced by.
