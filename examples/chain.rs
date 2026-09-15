@@ -60,7 +60,7 @@ fn main() {
     let total: usize = seen.values().map(|(_, count, _)| count).sum();
     println!(
         "{:>6}  {:>7}  {:>7}  {:>6}  {:>6}  {:>7}  {}",
-        "fifths", "octaves", "cents", "letter", "sharps", "commas", "first seen"
+        "fifths", "octaves", "cents", "letter", "sharps", "commas", "first seen",
     );
     for (fifths, (octaves, count, example)) in &seen {
         let cents = (f64::from(3).log2() - 1.0) * 1200.0 * *fifths as f64 + 1200.0 * *octaves as f64;
