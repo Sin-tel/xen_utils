@@ -206,8 +206,10 @@ steps.
    that just intonation gives it and only the accidental count changes. This is
    what writes `33/32` as two syntonic commas in 41et and as one septimal comma
    in 31et, and it reproduces every spelling the old equal temperament rule
-   produced. Where several stacks work, the lower primes are preferred, which
-   is the only tie-break needed.
+   produced. Where several stacks work, **the shortest one** is taken - which
+   in the notation basis is the comma worth the fewest marks. See the notation
+   basis section below: this step is exactly "stay inside the accidentals", and
+   its tie-break is exactly "write fewer symbols".
 2. **Otherwise the simplest comma.** The fifth chain has to be walked and how
    far is a choice again; the replacements that work differ by the commas the
    notation could temper out, so they form a coset of that lattice, and the
@@ -231,8 +233,8 @@ So step 2 is currently worth one better answer and some insurance. The insurance
 is the point: nothing at rank 2 and up plays the part the ups and downs rule
 plays at rank 1, so nothing there stops the preference order reaching for a long
 stack, and the list is thirty entries. Dropping step 2 would make the whole
-derivation metric-free, which is worth wanting - if a wider search of rank 2
-temperaments never makes the two disagree by more than magic does, drop it.
+derivation metric-free, which is worth wanting - **two metric-free replacements
+for it were tried in the notation basis and both are worse.** See below.
 
 Using the simplest comma *everywhere*, for the record, is clearly wrong: it
 spells 41et's `7/4` as `vvA#` instead of `vBb` and 31et's `11/8` as `vvGb`
@@ -265,6 +267,100 @@ the 11-limit writes `11/8` as `D###` where the old code gave `Abbb` - because
 the substitution compounds: `33/32` becomes two syntonic commas and each of
 those becomes twelve fifths. That is the price of kernel nesting, and it is
 `simplify`'s business, not the mapping's.
+
+## The notation basis
+
+The just intonation notation - octave, fifth, one accidental per prime beyond 3
+- is a **change of basis and nothing more**. Its generator matrix is triangular
+with `+-1` down the diagonal, since each accidental has exponent `+-1` on its
+own prime and support `{2, 3, p}`, so it is unimodular and `to_notation` and
+`to_just` are mutually inverse there. Any comma may be read in either basis
+without losing anything. `cargo run --example basis` prints both and asserts the
+round trip.
+
+What it buys is legibility. `5120/5103` is `[10, -6, 1, -1]` over the primes and
+`[0, 0, -1, 1]` in the notation basis, which says `81/80` and `64/63` are one
+interval and says it on sight.
+
+**Counting marks needs no matrix.** No generator other than the accidental for
+`p` touches `p` at all, so the notation coordinate of that accidental is `+-` the
+exponent of `p`. The number of accidental marks an interval is worth is
+therefore `sum |e_i|` over the primes beyond 3, read straight off the prime
+coordinates.
+
+### What the basis makes obvious
+
+Put the comma lattice in notation coordinates, columns `[octave, fifth, a_1,
+...]`, and take the Hermite normal form. It splits by **where the pivot lands**:
+
+- pivot in an accidental column, and the row has no octave and no fifth to it -
+  a notational comma of the step 1 kind;
+- pivot in the octave or fifth column - an **enharmonic**.
+
+That is math.md's exact sequence `0 -> ker N -> ker T -> E -> 0` made
+computational and canonical. 22et comes out as
+
+```
+[0, 0, 0, 1]      64/63 is tempered out
+[1, 0, -22, 0]    the octave is 22 ups
+[0, 1, -13, 0]    the fifth is 13 ups
+```
+
+which is the whole of ups and downs in 22et, read off a normal form. Every comma
+the search picks that has no octave and no fifth to it agrees with the matching
+row up to sign, over the whole list.
+
+The three classes `Search` sorts accidentals into are the same rows seen from
+the other side. Writing `K_0` for the sublattice with octave and fifth both
+zero - the relations among accidentals alone - an accidental is **tempered out**
+when `e_i` is in `K_0`, **passed over** when `e_i +- e_j` is, and gets a step 1
+stack when some other element of `K_0` has `+-1` on it.
+
+### What it does not fix
+
+Step 2 is where the fifth chain has to be walked, and the basis does not settle
+it. Two metric-free rules were implemented and swept over the temperament list
+and every equal temperament to 99 across six subgroups (912 notations,
+`cargo run --example dump`, which exists to be diffed):
+
+- **Fewest accidental marks.** Runs away along the fifth chain: huygens writes
+  `11/8` as `E##`, eighteen fifths up, to save two marks. 37 lines move, and
+  19et's recommendation falls from `vBb` to `Bbb`.
+- **Fewest symbols**, an unweighted `L1` on the notation coordinates bar the
+  octave, so one fifth of walk costs one mark. 64 lines move: 12et's `11/8` goes
+  `F#` to `Gb`, and 9et, 11et and 18et all shift.
+
+The reason is structural. Marks and fifth-walk are two competing costs; any
+lexicographic order on them runs away in one direction (the preference order
+runs away into accidentals, fewest-marks runs away into fifths), and an
+unweighted sum is an empirical claim that one fifth costs one mark. `sopfr`
+balances them because it is a single norm on the actual interval, which is
+exactly what math.md section 6 says the notation coordinates cannot carry: there
+is no prime on the fifth axis. **Step 2 stays.**
+
+### What it did fix
+
+Step 1's tie-break. It used to be a lexicographic preference over the available
+accidentals, lower primes first, with a nearest-to-zero rule inside the
+arithmetic progression where the count was not pinned - a recursive function
+with three separate conventions in it. Replacing the whole of it with **the
+shortest stack** loses nothing and gains something:
+
+- Dropping the preference order entirely, for any solution at all, changes
+  **17 of 912** lines. Every one is the same shape: the `33/32` comma of an
+  11-limit notation keeping both `81/80` and `64/63`. Everywhere else
+  availability already pins the stack up to sign, and the old machinery was
+  deciding nothing.
+- Taking the shortest stack instead changes **16** lines, the same shape again,
+  and fifteen of them strictly reduce the mark count. 72et is the one to look
+  at: `11/8` was `^^^F`, three syntonic commas, and is now `^>F`, one syntonic
+  and one septimal, since 72et makes `33/32` worth one plus two steps as well as
+  three. That is the reading 11-limit marvel and miracle already had.
+
+So the one case where step 1 ever had a choice is now settled by counting
+symbols rather than by preferring low primes, which is both shorter to state and
+better where it differs. `a_stack_is_the_shortest_one_that_works` pins 72et
+down.
 
 ## Which notation to recommend
 
@@ -348,7 +444,8 @@ is the pythagorean comma, 7et's the apotome, 5et's the limma. That is the
   `assemble`, `note`, and the derivation of a single accidental.
 - `search.rs` - everything behind `Notation::options`. `Search` holds the
   temperament, the accidentals and their images; `Plan` is how it sorts them into
-  necessary, optional and never kept. Tested through `options`.
+  necessary, optional and never kept. `shortest_stack` is step 1 of the comma
+  choice and `Search::simplest_comma` is step 2. Tested through `options`.
 - `simplify.rs` - `Simplifier`: the comma lattice reduced once, then a seeded
   walk per interval. `cargo run --example simplify` walks 41et.
 - `util.rs` - integer vector helpers, with no music in them.
@@ -491,8 +588,16 @@ where the exponential lives.
 - **`Weighting` is not exposed on `options`.** The fallback in step 2 hardcodes
   the default. Tenney and Wilson agree exactly - same commas, same spellings -
   over the temperament list and over every equal temperament to 99 in the 5, 7
-  and 11-limit, so nothing turns on it yet, and the fallback may well go away
-  entirely.
+  and 11-limit, so nothing turns on it yet. It is no longer likely to go away:
+  two metric-free replacements were tried in the notation basis and both are
+  worse, for the reason given there.
+- **`shortest_stack` walks a box, like `Simplifier` does.** Minimising the
+  number of marks is an `L1` problem again, so the same pattern applies: reduce
+  the relations with `lll`, then walk `WIDTH` either way and settle ties on the
+  counts. Nothing over the list or any equal temperament to 99 comes within the
+  box of its edge - checked by instrumenting the walk - but it is a bounded
+  search, not a proof, and a subgroup wide enough to need a larger `WIDTH` would
+  fail quietly rather than loudly.
 - **Whether `225/224` may be an accidental: resolved, no.** The `{2, 3, p}`
   support rule is a real constraint, not just an accident of how accidentals
   are derived. Everything hangs off a prime having exactly one accidental -

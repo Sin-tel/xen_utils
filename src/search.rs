@@ -260,9 +260,13 @@ impl<'a> Search<'a> {
     /// Which replacement is usually still a choice, settled in two steps. A
     /// plain stack of the accidentals still available keeps the nominal and the
     /// sharps that just intonation gives the prime and changes only the number
-    /// of accidentals, so where there is such a stack it is the one wanted. This
-    /// is what writes `33/32` as two syntonic commas in 41et and as one septimal
-    /// comma in 31et. Failing that, see [`simplest_comma`](Self::simplest_comma).
+    /// of accidentals, so where there is such a stack it is the one wanted -
+    /// the shortest, which is the comma worth the fewest marks. In the notation
+    /// basis such a comma is exactly one with no octave and no fifth to it, so
+    /// this step is "replace the accidental without leaving the accidentals".
+    /// It writes `33/32` as two syntonic commas in 41et, as one septimal comma
+    /// in 31et, and as one of each in 72et. Failing that, see
+    /// [`simplest_comma`](Self::simplest_comma).
     ///
     /// The stack has to come first: using the simplest comma everywhere spells
     /// 41et's `7/4` as `vvA#` instead of `vBb` and 31et's `11/8` as `vvGb`
@@ -275,15 +279,15 @@ impl<'a> Search<'a> {
             return Ok(self.accidentals[index].clone());
         }
 
-        // The accidentals still available, lowest prime first, so that a stack
-        // reaches for the lower primes where it has a choice.
+        // The accidentals still available, in order of the primes, which is
+        // only so that the counts line up with the accidentals they count.
         let mut order: Vec<usize> = available.iter().copied().filter(|&o| o != index).collect();
         order.sort_unstable();
         let stack = select(&self.accidentals, &order);
 
         let target = self.temperament.map(&self.accidentals[index])?;
         let images = self.temperament.map_all(&stack)?;
-        if let Some(counts) = preferred_solution(&target, &images) {
+        if let Some(counts) = shortest_stack(&target, &images) {
             return Ok(difference(&self.accidentals[index], &counts, &stack));
         }
 
@@ -378,65 +382,75 @@ fn subsets(items: &[usize], size: usize) -> Vec<Vec<usize>> {
     result
 }
 
-/// The greatest common divisor of `a` and `b`, which is zero only if both are.
-fn gcd(a: i64, b: i64) -> i64 {
-    let (mut a, mut b) = (a.abs(), b.abs());
-    while b != 0 {
-        (a, b) = (b, a % b);
-    }
-    a
-}
-
-/// Writes `target` as an integer combination of `generators`, given in order of
-/// preference, most preferred first. `None` if it cannot be written as one at
-/// all.
+/// Writes `target` as an integer combination of `generators` using as few of
+/// them as possible, counted with multiplicity. `None` if it cannot be written
+/// as one at all.
 ///
-/// A combination is usually not unique, and the preference order picks one out.
-/// The last generator is used only if `target` cannot be reached without it,
-/// and then by as little as possible; then the one before it, and so on. Where
-/// the amount is not pinned down either, the counts that work form an
-/// arithmetic progression, and the one nearest none is taken.
-fn preferred_solution(target: &[i64], generators: &Matrix<i64>) -> Option<Vec<i64>> {
-    let Some((last, rest)) = generators.split_last() else {
+/// The count of each generator is the notation coordinate of that accidental,
+/// so the sum of their absolute values is the number of marks the comma is
+/// worth - and the shortest stack is the comma written with the fewest symbols.
+/// That is the whole of the preference: `33/32` in 72et comes out as one
+/// `81/80` and one `64/63` rather than as three `81/80`s, because two marks
+/// beat three.
+///
+/// A combination is usually not unique. The ones that work differ by the
+/// relations the kept accidentals have among themselves - which are enharmonics
+/// of the notation, not commas of it - so they form a coset, and this walks a
+/// box around a reduced basis of it the way [`Simplifier`](crate::Simplifier)
+/// walks its own. Ties are settled by the counts themselves, so the answer
+/// never depends on the order the box is walked in.
+fn shortest_stack(target: &[i64], generators: &Matrix<i64>) -> Option<Vec<i64>> {
+    if generators.is_empty() {
         return is_zero(target).then(Vec::new);
-    };
-    let rest = rest.to_vec();
-
-    // Reaching the target without the least preferred generator at all.
-    if let Some(mut counts) = preferred_solution(target, &rest) {
-        counts.push(0);
-        return Some(counts);
     }
 
     let columns = transpose(generators);
-    let Ok(solution) = solve_diophantine(&columns, &column(target)) else {
-        return None;
-    };
+    let solution = solve_diophantine(&columns, &column(target)).ok()?;
+    let stack = first_column(&solution);
 
-    // The counts of the last generator that work differ by whatever multiple of
-    // it the others can make up for, so they run in steps of `period`.
-    let kernel = kernel_right(&columns)
-        .expect("the solve above put these same columns through the same hermite form");
-    let period = if kernel.len() == generators.len() {
-        kernel[generators.len() - 1].iter().copied().fold(0, gcd)
-    } else {
-        0
-    };
-
-    let mut count = solution[generators.len() - 1][0];
-    if period != 0 {
-        count = count.rem_euclid(period);
-        if 2 * count > period {
-            count -= period;
-        }
+    // The relations among the generators, which is what any two stacks worth
+    // the same differ by. Without them the stack is forced.
+    let freedom =
+        kernel_right(&columns).expect("the solve put these columns through the same form");
+    let freedom = transpose(&freedom);
+    if freedom.is_empty() || freedom[0].is_empty() {
+        return Some(stack);
     }
+    // Unit weights: these coordinates count accidentals, not primes, so there
+    // is nothing to weight them by and nothing being smuggled in.
+    let size = freedom[0].len();
+    let weights = (0..size)
+        .map(|row| (0..size).map(|col| f64::from(u8::from(row == col))).collect())
+        .collect();
+    let freedom = lll(&freedom, 0.99, &weights).ok()?;
 
-    let reduced = subtract(
-        target,
-        &combination(&[count], &vec![last.clone()], target.len()),
-    );
-    let mut counts =
-        preferred_solution(&reduced, &rest).expect("the remainder is reachable by construction");
-    counts.push(count);
-    Some(counts)
+    let marks = |counts: &Vec<i64>| (counts.iter().map(|c| c.abs()).sum::<i64>(), counts.clone());
+    let mut best = stack.clone();
+    let mut steps = vec![-WIDTH; freedom.len()];
+    loop {
+        let candidate = combination(&steps, &freedom, stack.len())
+            .iter()
+            .zip(&stack)
+            .map(|(a, b)| a + b)
+            .collect();
+        if marks(&candidate) < marks(&best) {
+            best = candidate;
+        }
+
+        let mut place = 0;
+        while place < steps.len() && steps[place] == WIDTH {
+            steps[place] = -WIDTH;
+            place += 1;
+        }
+        if place == steps.len() {
+            return Some(best);
+        }
+        steps[place] += 1;
+    }
 }
+
+/// How far either way [`shortest_stack`] walks each relation among the
+/// generators. The stacks in play are a mark or two long, so this is far wider
+/// than anything that wins; nothing over the temperament list or any equal
+/// temperament to 99 comes within it of the edge.
+const WIDTH: i64 = 6;

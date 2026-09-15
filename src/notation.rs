@@ -952,6 +952,18 @@ mod tests {
     }
 
     #[test]
+    fn a_stack_is_the_shortest_one_that_works() {
+        // 72et is worth one step for 81/80, two for 64/63 and three for 33/32,
+        // so a notation keeping the first two may write the third either as
+        // three of the first or as one of each. Two marks beat three.
+        let options = et_options(72, "2.3.5.7.11");
+        assert_eq!(ranks(&options), vec![3, 4, 5]);
+        assert_eq!(note_of(&options[1], 11, 8), "^>F5");
+        // With only 81/80 kept there is nothing to choose and it is three.
+        assert_eq!(note_of(&options[0], 11, 8), "^^^F5");
+    }
+
+    #[test]
     fn the_recommendation_is_the_smallest_that_keeps_the_nominals() {
         // 41et has three notations. The smallest spells every prime off its
         // nominal, and the largest only turns the two marks of the middle one
