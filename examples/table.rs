@@ -17,8 +17,8 @@
 //! spellings of a pitch differ by an element of it, whichever notation produced
 //! them.
 
-use diophantine::{Matrix, hnf};
-use xen_utils::{Notation, Simplifier, Subgroup, Temperament};
+use diophantine::{Matrix, hnf, lll};
+use xen_utils::{Notation, Simplifier, Subgroup, Temperament, Weighting};
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -55,7 +55,12 @@ fn main() {
                     .join(" ")
             }
         );
-        println!("    kernel, in hermite normal form (what it spells alike):");
+        println!("    kernel - the commas it writes away, so the pairs of just");
+        println!("    intervals it cannot tell apart:");
+        for comma in reduced(&subgroup, n.commas()) {
+            println!("        {:14} {:?}", ratio(&subgroup, &comma), comma);
+        }
+        println!("    the same kernel in hermite normal form:");
         for row in normal(n.commas()) {
             println!("        {row:?}");
         }
@@ -212,6 +217,20 @@ fn scaled(subgroup: &Subgroup, t: &Temperament, step: i64, divisions: i64) -> Ve
         }
     }
     unreachable!("the fifth chain reaches every step of a notatable equal temperament")
+}
+
+/// A kernel basis reduced to small ascending intervals, which is the readable
+/// form: the stored basis is one comma per dropped accidental and says nothing.
+fn reduced(subgroup: &Subgroup, commas: &Matrix<i64>) -> Matrix<i64> {
+    if commas.is_empty() {
+        return Vec::new();
+    }
+    let weights = subgroup.weights(Weighting::Wilson);
+    lll(commas, 0.99, &weights)
+        .expect("a kernel basis")
+        .iter()
+        .map(|c| subgroup.ascending(c))
+        .collect()
 }
 
 /// A lattice in hermite normal form, which is the only way to tell two of them

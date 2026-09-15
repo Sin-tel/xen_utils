@@ -492,6 +492,49 @@ and an undecimal one in the analysis. The spelling has to be a function of the
 interval, and that function is `N`. `cargo run --example table` prints both
 columns.
 
+### Choosing the commas is choosing which commas to write away
+
+The sharpest way to say it. Fix the generators. Then `N` is determined by
+`ker N` and nothing else - `assemble` is that step - so the comma choice *is*
+the choice of `ker N`, and by the exact sequence `ker T = ker N + E` that is the
+choice of **which of the temperament's commas the notation writes away, and
+which it keeps as enharmonics**.
+
+41et over `2.3.5.7.11` tempers four commas, `lll` reduced:
+
+```
+100/99   225/224   385/384   441/440
+```
+
+A rank 3 notation writes two of them away and keeps two apart. The derived
+notation and the simplest comma one pick different pairs:
+
+```
+derived      ker N = 385/384, 2200/2187
+simplest     ker N = 100/99,  225/224
+```
+
+Same generators, same enharmonic lattice, both rank 3 - and they agree on
+**every interval the generators span**, which here is the whole 5-limit:
+
+```
+9/8 D    5/4 vE    6/5 ^Eb    45/32 vF#    5/3 vA    15/8 vB    81/64 E
+```
+
+identical in both. They differ only on where `7` and `11` sit, because those are
+the primes the generators do not reach. The visible consequence is which pairs
+of just intervals collapse onto one written note. The simplest comma notation
+has `896/891 = (100/99)/(225/224)` in its kernel, so it writes `14/11` and
+`81/64` both as `E` and cannot tell them apart; the derived one writes `vvvF`
+and `E`. Likewise `11/7` is `Ab` there against `^^^G` here.
+
+So "there is only one notation for 41et with a single up and down" is right about
+the **symbol system** and wrong about the **notation**: infinitely many maps
+share that system, since `N(7)` may sit anywhere in its coset of `E` and `N(11)`
+likewise. What picks one out is which commas it writes away, and that is a
+question worth asking directly - *which two of those four should a rank 3
+notation of 41et lose?* - rather than as "what replaces `64/63`".
+
 ### So what the search is for
 
 - **Which accidentals to keep** - tempered out, passed over, necessary,
