@@ -283,7 +283,7 @@ impl<'a> Search<'a> {
 
         let target = self.temperament.map(&self.accidentals[index])?;
         let images = self.temperament.map_all(&stack)?;
-        if let Some(counts) = preferred_solution(&target, &images)? {
+        if let Some(counts) = preferred_solution(&target, &images) {
             return Ok(difference(&self.accidentals[index], &counts, &stack));
         }
 
@@ -396,26 +396,27 @@ fn gcd(a: i64, b: i64) -> i64 {
 /// and then by as little as possible; then the one before it, and so on. Where
 /// the amount is not pinned down either, the counts that work form an
 /// arithmetic progression, and the one nearest none is taken.
-fn preferred_solution(target: &[i64], generators: &Matrix<i64>) -> Result<Option<Vec<i64>>, Error> {
+fn preferred_solution(target: &[i64], generators: &Matrix<i64>) -> Option<Vec<i64>> {
     let Some((last, rest)) = generators.split_last() else {
-        return Ok(is_zero(target).then(Vec::new));
+        return is_zero(target).then(Vec::new);
     };
     let rest = rest.to_vec();
 
     // Reaching the target without the least preferred generator at all.
-    if let Some(mut counts) = preferred_solution(target, &rest)? {
+    if let Some(mut counts) = preferred_solution(target, &rest) {
         counts.push(0);
-        return Ok(Some(counts));
+        return Some(counts);
     }
 
     let columns = transpose(generators);
     let Ok(solution) = solve_diophantine(&columns, &column(target)) else {
-        return Ok(None);
+        return None;
     };
 
     // The counts of the last generator that work differ by whatever multiple of
     // it the others can make up for, so they run in steps of `period`.
-    let kernel = kernel_right(&columns)?;
+    let kernel = kernel_right(&columns)
+        .expect("the solve above put these same columns through the same hermite form");
     let period = if kernel.len() == generators.len() {
         kernel[generators.len() - 1].iter().copied().fold(0, gcd)
     } else {
@@ -435,7 +436,7 @@ fn preferred_solution(target: &[i64], generators: &Matrix<i64>) -> Result<Option
         &combination(&[count], &vec![last.clone()], target.len()),
     );
     let mut counts =
-        preferred_solution(&reduced, &rest)?.expect("the remainder is reachable by construction");
+        preferred_solution(&reduced, &rest).expect("the remainder is reachable by construction");
     counts.push(count);
-    Ok(Some(counts))
+    Some(counts)
 }
