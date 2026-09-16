@@ -36,6 +36,9 @@ const WIDTH: i64 = 4;
 /// How many alternatives to show.
 const SHOWN: usize = 6;
 
+/// The orderings compared. See the module comment.
+const RANKINGS: [&str; 3] = ["marks", "symbols", "apotomes"];
+
 fn main() {
     let mut args = std::env::args().skip(1);
     let divisions: i64 = args.next().and_then(|a| a.parse().ok()).unwrap_or(41);
@@ -69,13 +72,13 @@ fn main() {
         "step", "simplest", "ranked by"
     );
 
-    let mut stable = [(0, 0), (0, 0)];
+    let mut stable = [(0, 0); RANKINGS.len()];
     for step in 0..divisions {
         let target = reached(&subgroup, &temperament, step, divisions);
         let simplified = simplifier.simplify(&target).expect("a simplification");
         let seed = notation.to_notation(&simplified).expect("a just interval");
 
-        for (which, label) in ["marks", "symbols"].into_iter().enumerate() {
+        for (which, label) in RANKINGS.into_iter().enumerate() {
             // The same ranking over a wider box. If the two disagree near the
             // top, the ordering is not converging and the count is wrong.
             let near = ranked(&seed, &lattice, label, WIDTH);
@@ -93,12 +96,12 @@ fn main() {
                 .collect();
             println!(
                 "{:>4}  {:>9}  {label:>12}  {}",
-                if label == "marks" {
+                if which == 0 {
                     step.to_string()
                 } else {
                     String::new()
                 },
-                if label == "marks" {
+                if which == 0 {
                     ratio(&subgroup, &simplified)
                 } else {
                     String::new()
@@ -109,7 +112,7 @@ fn main() {
     }
 
     println!();
-    for (which, label) in ["marks", "symbols"].into_iter().enumerate() {
+    for (which, label) in RANKINGS.into_iter().enumerate() {
         let (same, total) = stable[which];
         println!("{label:>12}: the first two agree with a wider box on {same} of {total} pitches");
     }
@@ -124,10 +127,10 @@ fn ranked(seed: &[i64], lattice: &Matrix<i64>, label: &str, width: i64) -> Vec<V
     let mut coset = walk(seed, lattice, width);
     coset.sort_by_key(|c| {
         let (marks, sharps) = cost(c);
-        let rank = if label == "marks" {
-            (marks, sharps)
-        } else {
-            (marks + sharps, marks)
+        let rank = match label {
+            "marks" => (marks, sharps, 0),
+            "symbols" => (marks + sharps, marks, 0),
+            _ => (apotomes(c), marks, sharps),
         };
         (rank, c.clone())
     });
@@ -142,6 +145,17 @@ fn cost(coordinates: &[i64]) -> (i64, i64) {
         coordinates[2..].iter().map(|c| c.abs()).sum(),
         (coordinates[1] + 1).div_euclid(7).abs(),
     )
+}
+
+/// What a spelling costs with a fifth priced at a seventh of an accidental.
+///
+/// Structural, not a tuned weight: seven fifths are an apotome, an apotome is a
+/// sharp, and a sharp is an accidental. So the chain of fifths and the marks are
+/// commensurable after all, and this is that one scale in integers - seven for a
+/// mark, one for a fifth.
+fn apotomes(coordinates: &[i64]) -> i64 {
+    let marks: i64 = coordinates[2..].iter().map(|c| c.abs()).sum();
+    7 * marks + coordinates[1].abs()
 }
 
 /// Every spelling within `width` enharmonics of `seed`.

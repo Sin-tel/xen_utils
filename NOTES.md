@@ -573,33 +573,53 @@ to put to anyone, and it does not have to be asked: it only decides which
 spelling comes back first for a just interval, and that is what the second query
 is for.
 
-### Ranking spellings: count marks and sharps together
+### Ranking spellings: a fifth is a seventh of an accidental
 
-Counting symbols is meaningful on this axis, unlike ranking intervals by
-notation coordinates - there is no prime on the fifth axis, but the number of
-symbols on a page is a count and not a claim about pitch. **Which** count still
-matters, and the two obvious ones do not behave alike.
-
-- **Marks before sharps**, with sharps only a tie-break, runs away. 41et's fifth
-  chain reaches every pitch, so far out along it there is always a spelling with
-  no marks and six sharps, and preferring no marks at any price finds it.
-- **Marks and sharps together** does not.
-
-Measured by widening the box and asking how much of the ordering survives, over
-the 41 pitches of 41et:
+Seven fifths are an apotome, an apotome is a sharp, and a sharp is an
+accidental. So the chain of fifths and the accidental marks **are**
+commensurable, structurally and with nothing tuned, and the scale is seven to
+one. In integers, a spelling costs
 
 ```
-      marks: the first two agree with a wider box on  7 of 41
-    symbols: the first two agree with a wider box on 41 of 41
+7 * marks + |fifth coordinate|
 ```
 
-This is the same runaway that killed the metric-free comma rules, one axis over,
-and the same cure: do not let one kind of symbol be preferred at any price. The
-lattice has to be `lll` reduced before the box is walked, too, for the reason
-`shortest_stack` and the `trace` example already record - unreduced, 41et's
-enharmonics come back as "the octave is 41 ups" and "the fifth is 24 ups", and a
-box around those reaches `vvvvvvvD` at seven marks while never reaching `vB#` at
-one mark and one sharp.
+This is the ordering to use. It is stable, it settles ties the other counts
+cannot, and it reproduces conventional practice without being told to. 12et
+comes out as
+
+```
+C  Db  D  Eb  E  F  F#  G  Ab  A  Bb  B
+```
+
+with the sharps as the second choice each time and the tritone an honest tie,
+and 41et's one step comes out `^C` ahead of `B#`, which is what anyone reading
+ups and downs wants and what counting symbols got wrong.
+
+### Ranking spellings: what the other counts do
+
+Two cheaper counts were tried first and are recorded because they fail in
+instructive ways. Measured by widening the box and asking how much of the
+ordering survives:
+
+```
+                          41et      31et      12et
+    marks first          7 / 41    20 / 31   12 / 12
+    marks and sharps    41 / 41    31 / 31   12 / 12
+    apotomes            41 / 41    31 / 31   12 / 12
+```
+
+- **Marks before sharps** runs away. An equal temperament whose fifth chain
+  reaches every pitch always has, far out along it, a spelling with no marks and
+  six sharps, and preferring no marks at any price finds it. Same runaway as the
+  metric-free comma rules, one axis over.
+- **Marks and sharps together** is stable but blunt: it cannot separate `C##`
+  from `Ebb`, and it puts 41et's `B#` ahead of `^C`.
+
+The lattice has to be `lll` reduced before the box is walked, for the reason
+`shortest_stack` and `trace` already record. Unreduced, 41et's enharmonics come
+back as "the octave is 41 ups" and "the fifth is 24 ups", and a box around those
+finds `vvvvvvvD` at seven marks while never reaching `vB#` at one and one.
 
 ### The gap this leaves
 
