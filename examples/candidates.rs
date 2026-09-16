@@ -37,7 +37,7 @@ fn main() {
             println!(
                 "    {:>7}  {:7} norm {:3}  {:+6.1}c",
                 format!("{numerator}/{denominator}"),
-                notation.note(&notation.to_notation(&candidate).unwrap()),
+                notation.note(&notation.spell(&candidate).unwrap()),
                 sopfr(&candidate, subgroup.basis()),
                 subgroup.to_cents(&candidate) - tempered,
             );

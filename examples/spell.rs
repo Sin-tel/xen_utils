@@ -64,7 +64,7 @@ fn main() {
             println!(
                 "{:>10}  {steps:>5}  {:>8}  {:>10}",
                 format!("{num}/{den}"),
-                n.note(&n.to_notation(&interval).unwrap()),
+                n.note(&n.spell(&interval).unwrap()),
                 format!("{sn}/{sd}")
             );
         }

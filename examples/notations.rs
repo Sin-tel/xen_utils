@@ -131,9 +131,7 @@ fn spelling(notation: &Notation) -> String {
     for index in 2..subgroup.dim() {
         let harmonic = octave_reduce(subgroup, index);
         let (num, den) = subgroup.to_ratio(&harmonic).expect("a single prime fits");
-        let coordinates = notation
-            .to_notation(&harmonic)
-            .expect("built over subgroup");
+        let coordinates = notation.spell(&harmonic).expect("built over subgroup");
         cell.push_str(&format!(" {num}/{den} {}", notation.note(&coordinates)));
     }
     cell

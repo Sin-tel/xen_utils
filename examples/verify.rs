@@ -89,64 +89,55 @@ fn check(name: &str, t: &Temperament) -> usize {
     }
 
     for (index, n) in options.iter().enumerate() {
-        for (position, generator) in n.generators().iter().enumerate() {
-            let mut unit = vec![0; n.rank()];
-            unit[position] = 1;
-            if n.to_notation(generator).unwrap() != unit {
-                fail(format!(
-                    "option {index}: generator {position} is not its unit vector"
-                ));
-            }
-        }
-        for comma in n.commas() {
-            if n.to_notation(comma).unwrap().iter().any(|&x| x != 0) {
-                fail(format!("option {index}: a comma is not in the kernel"));
-            }
-            if t.map(comma).unwrap().iter().any(|&x| x != 0) {
-                fail(format!(
-                    "option {index}: the comma {comma:?} is not tempered out"
-                ));
-            }
-        }
-        if n.commas().len() + n.rank() != n.dim() {
+        // A written note worth nothing that is not the unison: that is the whole
+        // of what an enharmonic is, and there are exactly as many of them as the
+        // notation has rank over the temperament.
+        if n.enharmonics().len() != n.rank() - t.rank() {
             fail(format!(
-                "option {index}: comma count does not fill out the rank"
+                "option {index}: {} enharmonics for a notation of rank {} over a rank {} temperament",
+                n.enharmonics().len(),
+                n.rank(),
+                t.rank()
             ));
+        }
+        for enharmonic in n.enharmonics() {
+            if n.pitch(enharmonic).unwrap().iter().any(|&x| x != 0) {
+                fail(format!(
+                    "option {index}: the enharmonic {enharmonic:?} is not worth nothing"
+                ));
+            }
+            if enharmonic.iter().all(|&x| x == 0) {
+                fail(format!("option {index}: an enharmonic is the unison"));
+            }
         }
 
-        // What the notation spells alike and what it still spells apart have to
-        // account between them for everything the temperament tempers out.
-        let enharmonics = n.enharmonics().unwrap();
-        let tempered = n.dim() - t.rank();
-        if n.commas().len() + enharmonics.len() != tempered {
-            fail(format!(
-                "option {index}: {} commas and {} enharmonics are not the {tempered} dimensions tempered out",
-                n.commas().len(),
-                enharmonics.len(),
-            ));
-        }
-        for enharmonic in &enharmonics {
-            if t.map(enharmonic).unwrap().iter().any(|&x| x != 0) {
+        // Every prime can be written, and reading the spelling back gives the
+        // pitch it was asked for.
+        for prime in 0..n.dim() {
+            let mut interval = vec![0i64; n.dim()];
+            interval[prime] = 1;
+            let spelling = n.spell(&interval).unwrap();
+            if n.pitch(&spelling).unwrap() != t.map(&interval).unwrap() {
                 fail(format!(
-                    "option {index}: the enharmonic {enharmonic:?} is not tempered out"
-                ));
-            }
-            if n.to_notation(enharmonic).unwrap().iter().all(|&x| x == 0) {
-                fail(format!(
-                    "option {index}: the enharmonic {enharmonic:?} is spelled as a unison"
+                    "option {index}: prime {prime} is spelled as another pitch"
                 ));
             }
         }
     }
 
-    // Kernel nesting: every comma of a larger notation is a comma of every
-    // smaller one.
+    // Each notation in the run keeps one accidental more than the one before,
+    // and keeps everything the one before it kept.
     for (index, pair) in options.windows(2).enumerate() {
         let (smaller, larger) = (&pair[0], &pair[1]);
-        for comma in larger.commas() {
-            if smaller.to_notation(comma).unwrap().iter().any(|&x| x != 0) {
+        if larger.rank() != smaller.rank() + 1 {
+            fail(format!(
+                "option {index} and the next differ by more than one"
+            ));
+        }
+        for accidental in &smaller.generators()[2..] {
+            if !larger.generators()[2..].contains(accidental) {
                 fail(format!(
-                    "option {index} does not contain the kernel of option {}",
+                    "option {} drops an accidental option {index} keeps",
                     index + 1
                 ));
             }

@@ -33,7 +33,7 @@ fn main() {
         println!(
             "{ups:3}  {:8}  {:6}",
             ratio(&subgroup, &simplified),
-            notation.note(&notation.to_notation(&simplified).unwrap()),
+            notation.note(&notation.spell(&simplified).unwrap()),
         );
     }
 }

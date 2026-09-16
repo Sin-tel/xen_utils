@@ -220,12 +220,17 @@ mod tests {
     use super::*;
     use crate::temperament::Temperament;
 
-    /// The recommended notation of the equal temperament of `divisions` over
-    /// `subgroup`, and its simplifier.
+    /// A notation of the equal temperament of `divisions` over `subgroup`, and
+    /// its simplifier.
+    ///
+    /// The largest of the run rather than the recommended one, since these tests
+    /// stack a notation's first accidental and the recommendation is free to
+    /// keep none. Simplifying does not depend on the notation either way.
     fn simplifier(divisions: i64, subgroup: &str) -> (Notation, Simplifier) {
         let subgroup: Subgroup = subgroup.parse().unwrap();
         let temperament = Temperament::et(divisions, &subgroup).unwrap();
-        let notation = Notation::from_temperament(&temperament).unwrap();
+        let options = Notation::options(&temperament).unwrap();
+        let notation = options.last().unwrap().clone();
         let simplifier = Simplifier::new(&notation).unwrap();
         (notation, simplifier)
     }
@@ -263,10 +268,7 @@ mod tests {
 
         let simplified = simplifier.simplify(&stacked).unwrap();
         assert_eq!(simplified, vec![1, 0, 0, 0, 0]);
-        assert_eq!(
-            notation.note(&notation.to_notation(&simplified).unwrap()),
-            "C6"
-        );
+        assert_eq!(notation.note(&notation.spell(&simplified).unwrap()), "C6");
     }
 
     #[test]

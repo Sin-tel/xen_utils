@@ -35,7 +35,7 @@ fn main() {
         options
             .iter()
             .map(|n| {
-                let mark = if n.mapping() == recommended.mapping() {
+                let mark = if n.generators() == recommended.generators() {
                     "*"
                 } else {
                     " "
@@ -51,7 +51,7 @@ fn main() {
         let simplified = simplifier.simplify(&stacked).unwrap();
         let notes: Vec<String> = options
             .iter()
-            .map(|n| n.note(&n.to_notation(&simplified).unwrap()))
+            .map(|n| n.note(&n.spell(&simplified).unwrap()))
             .collect();
 
         println!(

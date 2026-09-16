@@ -44,21 +44,35 @@ A notation is therefore never derived automatically in the sense of "the right
 answer". Each (notation, temperament) pair is a design decision, and the
 library's job is to offer the choices that make sense and let the caller pick.
 
-## How a notation is built
+## A notation is its generators
 
-The data is a subgroup, a list of accidentals, and a list of notational commas,
-with `accidentals + commas == dim - 2`. The mapping is derived: stack the
-generators (octave, fifth, accidentals) on top of the commas into a square
-matrix and invert it. `mapping * transpose(square) = [I | 0]` is the condition
-that each generator gets its unit vector and each comma goes to zero, so
+The data is a subgroup, a temperament and a list of accidentals. Everything
+else is derived from where the generators - the octave, the fifth and those
+accidentals - sit in the temperament:
 
 ```
-mapping = first `rank` rows of transpose(inverse(square))
+images[i]   = temperament.map(generator[i])     // rank x r
+enharmonics = kernel_left(images)               // rank r - rank(temperament)
 ```
 
-`integer_inverse` fails unless the determinant is ±1, which is exactly the
-check that the generators and commas together span the subgroup. If they do
-not, some interval has no integer spelling. `Notation::assemble` is this.
+`images` is the map `pitch` from a written note down to what it sounds, and its
+kernel is the enharmonic lattice: the written notes the temperament calls one
+pitch. `Notation::build` is those four lines plus two checks - that every
+accidental beyond the first has a symbol, and that the generators reach every
+pitch at all, which is `spans`.
+
+**There is no map from just intonation to choose.** Spelling a just interval is
+two steps that were previously one: ask the temperament what pitch it is, then
+ask which of that pitch's spellings reads best. That is `spell`, and the
+alternatives it passed over are `respell`. Both depend on the generators and the
+temperament and on nothing else, so **two notations keeping the same accidentals
+are the same notation** - which is why `generators()` is what to compare and why
+the search has nothing to say about just intonation.
+
+This replaces a matrix inversion, a kernel spanned by one fixed comma per
+dropped accidental, and about a hundred and ten lines of search picking those
+commas. See "What a notation decides, and what it cannot" for why none of it was
+deciding anything a caller could see.
 
 ## Accidentals
 
@@ -111,28 +125,6 @@ those generators generate `Z^rank(temperament)`. (Testable with
 - `r = dim` (the just intonation notation) always spans, so **some** notation
   always exists.
 
-## Uniqueness: where all the difficulty lives
-
-This is the thing worth remembering.
-
-- At `r == rank(temperament)` the notation is **forced**. `ker(N) = ker(T)`,
-  the matrix inversion produces it, there is nothing to choose and no heuristic
-  is needed.
-- At `r > rank(temperament)` the notation is **underdetermined**. Writing
-  `T = t . N`, the freedom is a map into `ker(t)` - and `ker(t)` is precisely
-  the enharmonic lattice. So choosing a notation above the temperament's rank
-  *is* the simplification problem. Any rule for it is a heuristic.
-
-The enharmonic lattice is worth computing directly:
-
-```
-images[i] = temperament.map(generator[i])       // rank x r
-enharmonics = kernel_left(images)               // rank r - rank(temperament)
-```
-
-An equal temperament is rank 1, so *every* notation of one is above its rank.
-That is why they need special handling, and why they came first.
-
 ## Every rank, one mechanism (implemented)
 
 `Notation::options` now works the same way at every rank, and the equal
@@ -175,218 +167,6 @@ worth exactly one step, and it notates fine. That entry is in the list now.
 This is the one place where rank 1 is still singled out, and it has to be: for
 rank above 1 no accidental can generate the tempered lattice by itself, so there
 is nothing for "worth one step" to generalise to.
-
-## Replacement: the one remaining choice
-
-Each accidental that is not kept gets **one comma, fixed once**, and the kernel
-of a notation is spanned by the commas of the accidentals it dropped. Taking an
-accidental on only ever removes a comma, so **kernels nest** by construction - a
-smaller notation spells alike everything a larger one does, and a larger
-notation's spelling can always be simplified onto a smaller one's. This is
-checked over the whole list and every equal temperament to 72 by
-`cargo run --example verify`.
-
-It is also what makes unimodularity automatic for every subset. A comma may be
-built from the octave, the fifth, the necessary accidentals, and the optional
-ones the run has already taken on - exactly the ones kept wherever this
-accidental is dropped. One that is never kept may use every optional accidental.
-Nothing is ever built from an accidental that is never kept, so substituting the
-commas back is triangular and terminates at the fifth chain. That last clause
-matters: letting a never-kept accidental stand in for another one only stacks one
-substitution on top of another, and it is why 41et's `7/4` is `vBb` - `64/63`
-reaching for `81/80`, which the notation does keep - rather than a detour on the
-chain.
-
-The comma is `accidental - replacement`, and the replacement has to be worth
-what the accidental is worth. That usually leaves a choice, settled in two
-steps.
-
-1. **A plain stack of the accidentals still available**, if there is one, with
-   no octaves and no fifths. The prime then keeps the nominal and the sharps
-   that just intonation gives it and only the accidental count changes. This is
-   what writes `33/32` as two syntonic commas in 41et and as one septimal comma
-   in 31et, and it reproduces every spelling the old equal temperament rule
-   produced. Where several stacks work, **the shortest one** is taken - which
-   in the notation basis is the comma worth the fewest marks. See the notation
-   basis section below: this step is exactly "stay inside the accidentals", and
-   its tie-break is exactly "write fewer symbols".
-2. **Otherwise the simplest comma.** The fifth chain has to be walked and how
-   far is a choice again; the replacements that work differ by the commas the
-   notation could temper out, so they form a coset of that lattice, and the
-   element of smallest `Weighting::Wilson` norm is taken (LLL then `cvp_exact`).
-
-Step 2 is the part that is not forced, and the case for it is thinner than it
-first looked. The alternative is to extend step 1's preference order to the
-octave and the fifth - avoid the fifth first, then the octave, then the higher
-accidentals. That runs away, because avoiding the fifth at any price is what
-lexicographic preference means: asked to replace a one step accidental where only
-a two step one is available, it answers with a stack of **25** of them and an
-octave off rather than take five fifths. But the ups and downs rule heads that
-off at rank 1 by never keeping a coarse accidental while a finer one is dropped,
-and with both rules in place the two tier 2 choices agree on **every** equal
-temperament to 99 and everywhere on the temperament list but one: 7-limit magic,
-where the simplest comma gives `225/224` and `vvA#` and the preference order
-gives `864/875` and `^^^Bbb`. Two marks and a comma the temperament is named for,
-against three marks and a comma nobody would name.
-
-So step 2 is currently worth one better answer and some insurance. The insurance
-is the point: nothing at rank 2 and up plays the part the ups and downs rule
-plays at rank 1, so nothing there stops the preference order reaching for a long
-stack, and the list is thirty entries. Dropping step 2 would make the whole
-derivation metric-free, which is worth wanting - **two metric-free replacements
-for it were tried in the notation basis and both are worse.** See below.
-
-Using the simplest comma *everywhere*, for the record, is clearly wrong. Over
-`2.3.5.7.11` it spells 41et's `7/4` as `vvA#` rather than `vBb` in the rank 3
-notation keeping `81/80`, and 31et's `11/8` as `vvGb` rather than `^F` in the
-one keeping `64/63`. The stack has to come first.
-
-**That comparison was written before the simplifier existed, so it is worth
-saying exactly what it does and does not claim.** Both spellings of each pair
-name the same pitch. Two notations keeping the same generators have the same map
-from notation coordinates down to pitches, hence literally the same enharmonic
-lattice - checked, `[[0, 1, -24], [1, 0, -41]]` for both 41et notations and
-`[[0, 1, -18], [1, 0, -31]]` for both 31et ones - and `vvA#` less `vBb` is
-`[7, -12, 1]`, which is in it. So **neither spelling is unavailable in either
-notation**, and anything cycling spellings reaches both. What the comma decides
-is which one the notation hands back for the just interval, which is what a
-reader actually sees.
-
-Decided that way it still holds, and more strongly than at one prime. Spelling
-every pitch's simplest interval over the whole table (`cargo run --example
-table`):
-
-| notation            | stack first | simplest comma |
-| ------------------- | ----------- | -------------- |
-| 41et `[3]`, `81/80` | 41 marks, 15 sharps | 50 marks, 31 sharps |
-| 31et `[3]`, `64/63` | 20 marks, 12 sharps | 26 marks, 16 sharps |
-
-One honest caveat: at 41et's `[2]`, which keeps nothing, the simplest comma is
-the *better* of the two, 60 sharps against 73, because the substituted commas
-compound differently with nothing to stop them. So "the stack first" is not
-uniformly better across a run - it is better at the notations that keep an
-accidental, which are the ones anyone uses.
-
-Wilson weighting is a metric rather than a tuned weight, and
-`reduced_comma_basis` already uses it, so this is not the weighted cost function
-the dead end above was about. It also cannot break kernel nesting the way that
-one did, since nesting no longer depends on how the comma is chosen.
-
-### What the run looks like now
-
-Every equal temperament comes out exactly as the old code had it, which is the
-main evidence that the general rules are the right ones. What is new is the
-middle of the run for rank 2 and up.
-
-- **huygens** gains a rank 3: keep `64/63`, write `11/8` as `vvGb`.
-- **11-limit marvel and miracle** gain a rank 4: keep `81/80` and `64/63`, write
-  `11/8` as `^>F`, one of each, since `33/32` is worth exactly what the two are
-  worth together.
-- **7-limit miracle, orwell and magic** gain a rank 3, keeping only `81/80` and
-  writing `7/4` as `vvA#` over the comma `225/224`, which all three temper out.
-  The old code refused to guess here and jumped to the next notation up.
-- **pele loses** its rank 4. It tempers out `5120/5103`, so its accidentals for 5
-  and 7 are one interval and a notation with both is the same notation twice.
-
-Spellings in the bottom notation of a large equal temperament are wild - 41et in
-the 11-limit writes `11/8` as `D###` where the old code gave `Abbb` - because
-the substitution compounds: `33/32` becomes two syntonic commas and each of
-those becomes twelve fifths. That is the price of kernel nesting, and it is
-`simplify`'s business, not the mapping's.
-
-## The notation basis
-
-The just intonation notation - octave, fifth, one accidental per prime beyond 3
-- is a **change of basis and nothing more**. Its generator matrix is triangular
-with `+-1` down the diagonal, since each accidental has exponent `+-1` on its
-own prime and support `{2, 3, p}`, so it is unimodular and `to_notation` and
-`to_just` are mutually inverse there. Any comma may be read in either basis
-without losing anything. `cargo run --example basis` prints both and asserts the
-round trip.
-
-What it buys is legibility. `5120/5103` is `[10, -6, 1, -1]` over the primes and
-`[0, 0, -1, 1]` in the notation basis, which says `81/80` and `64/63` are one
-interval and says it on sight.
-
-**Counting marks needs no matrix.** No generator other than the accidental for
-`p` touches `p` at all, so the notation coordinate of that accidental is `+-` the
-exponent of `p`. The number of accidental marks an interval is worth is
-therefore `sum |e_i|` over the primes beyond 3, read straight off the prime
-coordinates.
-
-### What the basis makes obvious
-
-Put the comma lattice in notation coordinates, columns `[octave, fifth, a_1,
-...]`, and take the Hermite normal form. It splits by **where the pivot lands**:
-
-- pivot in an accidental column, and the row has no octave and no fifth to it -
-  a notational comma of the step 1 kind;
-- pivot in the octave or fifth column - an **enharmonic**.
-
-That is math.md's exact sequence `0 -> ker N -> ker T -> E -> 0` made
-computational and canonical. 22et comes out as
-
-```
-[0, 0, 0, 1]      64/63 is tempered out
-[1, 0, -22, 0]    the octave is 22 ups
-[0, 1, -13, 0]    the fifth is 13 ups
-```
-
-which is the whole of ups and downs in 22et, read off a normal form. Every comma
-the search picks that has no octave and no fifth to it agrees with the matching
-row up to sign, over the whole list.
-
-The three classes `Search` sorts accidentals into are the same rows seen from
-the other side. Writing `K_0` for the sublattice with octave and fifth both
-zero - the relations among accidentals alone - an accidental is **tempered out**
-when `e_i` is in `K_0`, **passed over** when `e_i +- e_j` is, and gets a step 1
-stack when some other element of `K_0` has `+-1` on it.
-
-### What it does not fix
-
-Step 2 is where the fifth chain has to be walked, and the basis does not settle
-it. Two metric-free rules were implemented and swept over the temperament list
-and every equal temperament to 99 across six subgroups (912 notations,
-`cargo run --example dump`, which exists to be diffed):
-
-- **Fewest accidental marks.** Runs away along the fifth chain: huygens writes
-  `11/8` as `E##`, eighteen fifths up, to save two marks. 37 lines move, and
-  19et's recommendation falls from `vBb` to `Bbb`.
-- **Fewest symbols**, an unweighted `L1` on the notation coordinates bar the
-  octave, so one fifth of walk costs one mark. 64 lines move: 12et's `11/8` goes
-  `F#` to `Gb`, and 9et, 11et and 18et all shift.
-
-The reason is structural. Marks and fifth-walk are two competing costs; any
-lexicographic order on them runs away in one direction (the preference order
-runs away into accidentals, fewest-marks runs away into fifths), and an
-unweighted sum is an empirical claim that one fifth costs one mark. `sopfr`
-balances them because it is a single norm on the actual interval, which is
-exactly what math.md section 6 says the notation coordinates cannot carry: there
-is no prime on the fifth axis. **Step 2 stays.**
-
-### What it did fix
-
-Step 1's tie-break. It used to be a lexicographic preference over the available
-accidentals, lower primes first, with a nearest-to-zero rule inside the
-arithmetic progression where the count was not pinned - a recursive function
-with three separate conventions in it. Replacing the whole of it with **the
-shortest stack** loses nothing and gains something:
-
-- Dropping the preference order entirely, for any solution at all, changes
-  **17 of 912** lines. Every one is the same shape: the `33/32` comma of an
-  11-limit notation keeping both `81/80` and `64/63`. Everywhere else
-  availability already pins the stack up to sign, and the old machinery was
-  deciding nothing.
-- Taking the shortest stack instead changes **16** lines, the same shape again,
-  and fifteen of them strictly reduce the mark count. 72et is the one to look
-  at: `11/8` was `^^^F`, three syntonic commas, and is now `^>F`, one syntonic
-  and one septimal, since 72et makes `33/32` worth one plus two steps as well as
-  three. That is the reading 11-limit marvel and miracle already had.
-
-So the one case where step 1 ever had a choice is now settled by counting
-symbols rather than by preferring low primes, which is both shorter to state and
-better where it differs. `a_stack_is_the_shortest_one_that_works` pins 72et
-down.
 
 ### Sweeping equal temperaments proves less than it looks
 
@@ -492,62 +272,23 @@ and an undecimal one in the analysis. The spelling has to be a function of the
 interval, and that function is `N`. `cargo run --example table` prints both
 columns.
 
-### Choosing the commas is choosing which commas to write away
+### So what the search is for, and what it now is
 
-The sharpest way to say it. Fix the generators. Then `N` is determined by
-`ker N` and nothing else - `assemble` is that step - so the comma choice *is*
-the choice of `ker N`, and by the exact sequence `ker T = ker N + E` that is the
-choice of **which of the temperament's commas the notation writes away, and
-which it keeps as enharmonics**.
+**Implemented.** `search.rs` went from 470 lines to 220 and no longer mentions a
+comma. What is left is: derive one accidental per prime, drop the ones the
+temperament tempers out, drop the ones worth what a kept one is worth, and check
+the rest one at a time against `spans`. `Plan` is two lists rather than four.
 
-41et over `2.3.5.7.11` tempers four commas, `lll` reduced:
-
-```
-100/99   225/224   385/384   441/440
-```
-
-A rank 3 notation writes two of them away and keeps two apart. The derived
-notation and the simplest comma one pick different pairs:
-
-```
-derived      ker N = 385/384, 2200/2187
-simplest     ker N = 100/99,  225/224
-```
-
-Same generators, same enharmonic lattice, both rank 3 - and they agree on
-**every interval the generators span**, which here is the whole 5-limit:
-
-```
-9/8 D    5/4 vE    6/5 ^Eb    45/32 vF#    5/3 vA    15/8 vB    81/64 E
-```
-
-identical in both. They differ only on where `7` and `11` sit, because those are
-the primes the generators do not reach. The visible consequence is which pairs
-of just intervals collapse onto one written note. The simplest comma notation
-has `896/891 = (100/99)/(225/224)` in its kernel, so it writes `14/11` and
-`81/64` both as `E` and cannot tell them apart; the derived one writes `vvvF`
-and `E`. Likewise `11/7` is `Ab` there against `^^^G` here.
-
-So "there is only one notation for 41et with a single up and down" is right about
-the **symbol system** and wrong about the **notation**: infinitely many maps
-share that system, since `N(7)` may sit anywhere in its coset of `E` and `N(11)`
-likewise. What picks one out is which commas it writes away, and that is a
-question worth asking directly - *which two of those four should a rank 3
-notation of 41et lose?* - rather than as "what replaces `64/63`".
-
-### So what the search is for
 
 - **Which accidentals to keep** - tempered out, passed over, necessary,
   optional. This picks the generators, hence `t`, hence `E`: it chooses the
   symbol system itself. Nothing downstream can do this and it is the bulk of
   `Search`.
 - **The run and the recommendation**, which are built on that.
-- **The commas**, which pick `N` out of the maps compatible with that system.
-  Load-bearing, but only on the primes the kept generators do not already span -
-  for 41et's rank 3 notation the 5-limit is spanned, so `5/4` is forced to `vE`
-  and only `7` and `11` are chosen. This is a smaller job than the code implies,
-  which is what the earlier measurement showed: dropping the preference order
-  entirely moved 17 of 912 lines.
+- ~~The commas~~, which used to pick one map out of the many compatible with
+  that system. Gone: nothing downstream could see which one was picked, since
+  every spelling it could have given is in the same coset of `E` and `respell`
+  ranks that coset directly.
 
 ### The question that is actually wanted
 
@@ -573,62 +314,42 @@ to put to anyone, and it does not have to be asked: it only decides which
 spelling comes back first for a just interval, and that is what the second query
 is for.
 
-### Ranking spellings: a fifth is a seventh of an accidental
+### Ranking spellings: a sharp is worth two accidental marks
 
-Seven fifths are an apotome, an apotome is a sharp, and a sharp is an
-accidental. So the chain of fifths and the accidental marks **are**
-commensurable, structurally and with nothing tuned, and the scale is seven to
-one. In integers, a spelling costs
+Seven fifths are an apotome, so the chain of fifths and the accidental marks are
+commensurable and nothing has to be tuned. And an accidental is at most **half**
+an apotome by construction - `MAX_ACCIDENTAL_CENTS`, the rule the whole
+derivation of an accidental hangs on - so two marks are an apotome, which is a
+sharp. In half-apotomes: **seven for a mark, two for a fifth**.
 
-```
-7 * marks + |fifth coordinate|
-```
+The fifths are counted as how far the note sits *beyond the seven naturals*
+rather than as a distance from `C`. `F C G D A E B` are the fifth coordinates
+`-1` to `5`, and all seven cost nothing; a fifth past either end costs two.
+Measuring from `C` instead makes the flat side cheaper throughout, which is
+enough to spell 5et's third `F` and 7et's `Eb`. Ties are settled by distance
+from `D`, the middle of the naturals, and then by the coordinates, so the order
+never depends on how the search was walked.
 
-This is the ordering to use. It is stable, it settles ties the other counts
-cannot, and it reproduces conventional practice without being told to. 12et
-comes out as
+That is `apotomes` in `notation.rs`, and it is the whole of the ranking. It
+gives 12et `C Db D Eb E F F# G Ab A Bb B` with the sharps as the alternates,
+41et's one step `^C` ahead of `B#`, and 22et's third `vE` ahead of `D#` in the
+notation that keeps a comma for it.
 
-```
-C  Db  D  Eb  E  F  F#  G  Ab  A  Bb  B
-```
+Three readings of "a fifth is a seventh of an accidental" were tried against the
+test suite, which is the only thing that separated them:
 
-with the sharps as the second choice each time and the tritone an honest tie,
-and 41et's one step comes out `^C` ahead of `B#`, which is what anyone reading
-ups and downs wants and what counting symbols got wrong.
-
-### Ranking spellings: what the other counts do
-
-Two cheaper counts were tried first and are recorded because they fail in
-instructive ways. Measured by widening the box and asking how much of the
-ordering survives:
-
-```
-                          41et      31et      12et
-    marks first          7 / 41    20 / 31   12 / 12
-    marks and sharps    41 / 41    31 / 31   12 / 12
-    apotomes            41 / 41    31 / 31   12 / 12
-```
-
-- **Marks before sharps** runs away. An equal temperament whose fifth chain
-  reaches every pitch always has, far out along it, a spelling with no marks and
-  six sharps, and preferring no marks at any price finds it. Same runaway as the
-  metric-free comma rules, one axis over.
-- **Marks and sharps together** is stable but blunt: it cannot separate `C##`
-  from `Ebb`, and it puts 41et's `B#` ahead of `^C`.
-
-The lattice has to be `lll` reduced before the box is walked, for the reason
-`shortest_stack` and `trace` already record. Unreduced, 41et's enharmonics come
-back as "the octave is 41 ups" and "the fifth is 24 ups", and a box around those
-finds `vvvvvvvD` at seven marks while never reaching `vB#` at one and one.
+| measure | what it costs a fifth | result |
+| --- | --- | --- |
+| `7 * marks + \|f\|` | one, from `C` | 22et writes `D#`, never using the comma it keeps |
+| `7 * marks + 2 * \|f - 2\|` | two, from `D` | flattone writes `F#`, 7et `Eb` |
+| `7 * marks + 2 * beyond` | two, past the naturals | what is in the code |
 
 ### The gap this leaves
 
-Nothing offers the **other spellings of a pitch**. `Notation::enharmonics` gives
-the lattice and `verify` checks it, but there is no way to ask for `Ebb` and
-`C##` once `D` has been returned, which is the one thing a notation genuinely
-cannot decide and a caller genuinely wants to cycle. `candidates` cycles
-*readings* - distinct intervals - and is the wrong axis for it, as its own note
-already says.
+`Notation::respell` now answers it: given a written note, the other ways to
+write that pitch, best first. `candidates` cycles *readings* - distinct just
+intervals - and `respell` cycles spellings, which are the two questions a caller
+has and the two the library now separates.
 
 ## Which notation to recommend
 
@@ -641,13 +362,17 @@ letter.
 41et is the case that makes it obvious once the run is laid out:
 
 ```
-   [2]  5/4 Fb5   7/4 Cbb6   11/8 D###5
+   [2]  5/4 Fb5   7/4 Cbb6   11/8 Abbb5
 -> [3]  5/4 vE5   7/4 vBb5   11/8 ^^F5
-   [4]  5/4 vE5   7/4 vBb5   11/8 >F5
+   [4]  5/4 vE5   7/4 tA5    11/8 tF5
 ```
 
 `[2]` has all three primes off their nominals; `[4]` only turns the two marks of
 `[3]` into one of another kind, so `[3]` is the one wanted.
+
+Since `keeps_nominals` now asks where `spell` puts a prime rather than where a
+comma did, it can answer differently: huygens' rank 3 notation already spells
+every prime on its own nominal, so the recommendation moved down one.
 
 **Sharps and flats do not count.** Seven fifths leave the letter alone, so the
 test is on the fifth coordinate mod 7, not on the coordinate itself. Flattone is
@@ -682,38 +407,15 @@ choice**: every single one is a run of length one. So the fallback never actuall
 decides anything, and the rule is unambiguous wherever there is anything to
 decide. `a_run_with_a_choice_always_keeps_its_nominals_somewhere` pins that down.
 
-## Enharmonics
-
-`ker(notation)` is what the notation spells alike; the **enharmonic lattice** is
-what the temperament calls a unison and the notation still spells apart. Between
-them they account for everything the temperament tempers out, which `verify` now
-checks:
-
-```
-rank(ker notation) + rank(enharmonics) == dim - rank(temperament)
-```
-
-`Notation::enharmonics(temperament)` is `kernel_left` of the generator images,
-returned as interval vectors so that it matches `commas()`. `to_notation` puts
-one back in notation coordinates, and that is the form worth reading: 22et's
-rank 3 notation gives `[0, 1, -13]` and `[1, 0, -22]`, i.e. its fifth is thirteen
-ups and its octave twenty two - the whole of ups and downs in 22et, which the
-mapping always implied but never stated.
-
-Every notation of an equal temperament has one, and has to: `assemble` sends each
-generator to its own unit vector, so a notation is free on the octave, the fifth
-and its accidentals and can never close the circle of fifths. 12et's enharmonic
-is the pythagorean comma, 7et's the apotome, 5et's the limma. That is the
-`C# != Db` property, not a defect.
-
 ## Where the code lives
 
-- `notation.rs` - the `Notation` type: its mapping, its kernel, its enharmonics,
-  `assemble`, `note`, and the derivation of a single accidental.
-- `search.rs` - everything behind `Notation::options`. `Search` holds the
-  temperament, the accidentals and their images; `Plan` is how it sorts them into
-  necessary, optional and never kept. `shortest_stack` is step 1 of the comma
-  choice and `Search::simplest_comma` is step 2. Tested through `options`.
+- `notation.rs` - the `Notation` type: its generators, `pitch`, `enharmonics`,
+  `spell`, `respell`, `note`, the ranking `apotomes`, and the derivation of a
+  single accidental.
+- `search.rs` - everything behind `Notation::options`, and only the choice of
+  which accidentals to keep. `Search` holds the temperament, the accidentals and
+  their images; `Plan` sorts them into necessary and optional. Tested through
+  `options`.
 - `simplify.rs` - `Simplifier`: the comma lattice reduced once, then a seeded
   walk per interval. `cargo run --example simplify` walks 41et.
 - `cargo run --example trace` - the derivation of one temperament, a step at a
@@ -822,19 +524,35 @@ where the exponential lives.
 
 ## Loose ends and known limits
 
+- **`respell` walks a box, like everything else here.** `RESPELL_WIDTH` either
+  way around a `cvp_exact` seed on the `lll` reduced enharmonics. Both the
+  reduction and the seed are load-bearing and both were found the hard way:
+  unreduced, 41et's enharmonics are "the octave is 41 ups" and "the fifth is 24
+  ups" and a box around them misses everything legible; unseeded, a notation
+  with two accidentals hands back a spelling fifteen marks out. The quadratic
+  weights `cvp_exact` takes are a stand-in for `apotomes`, which is a count and
+  not a form.
+- **The ranking is blind to which accidental it uses**, and that shows. 41et's
+  rank 4 notation writes `7/4` as `tA5`, using the mark that belongs to 11,
+  because one mark on `A` is cheaper than one mark on `Bb` - `A` is inside the
+  naturals and `Bb` is a fifth outside. Flattone's larger notation keeps an
+  accidental for 11 and then writes `11/8` as `F#` anyway. Both follow from
+  spelling being a function of the pitch alone, which is what was wanted, and
+  both are cases where the cheapest symbol carries the wrong harmonic hint. A
+  tie-break preferring the accidental of the prime being written is not
+  available, since `spell` is handed a pitch and not a prime; a cost that reads
+  the accidentals in order of their primes would be.
+- **Huygens now wants the second of its three notations**, not the third, its
+  rank 3 already spelling every prime on its own nominal. That is
+  `keeps_nominals` asking `spell` rather than asking a comma.
+- ~~Nothing offers the other spellings of a pitch.~~ Fixed: `Notation::respell`.
+
 - **The simplifier is a local search, not a proof.** `Simplifier` reduces the
   temperament's comma lattice once, takes the `cvp_exact` answer as a seed, and
   then walks it under the norm actually wanted. It agrees with a wider step for
   every interval within nineteen generators of the unison, over 59109 swept; the
   stalls past that are twenty octaves out, where the norm is minimized by
   trading a pile of one prime for a pile of another. See `SEARCH_RADIUS`.
-- **`Notation` has no `PartialEq`.** It used to derive one, comparing the
-  stored comma basis, which meant two notations with the same mapping built
-  from different bases of the same kernel compared unequal - a trap, since
-  nothing about a notation's meaning depends on which basis its kernel happens
-  to be stored as. Struct equality was never actually what any caller wanted;
-  the places that compared two notations for being "the same" now compare
-  `mapping()` directly, which is what decides everything a notation does.
 - **Accidental symbols are keyed to the prime, with one exception.** A
   notation keeping more than one accidental gives each its own fixed symbol
   from `PRIME_SYMBOLS`, so the same prime prints the same way regardless of
@@ -859,19 +577,6 @@ where the exponential lives.
   worth one step gets no notation rather than an arbitrary one. Over `2.3.5`
   that is 25, 51 and 54 up to 72; over `2.3.5.7`, 25, 54 and 57. A wider
   subgroup is the answer for these, and the `24et` entry shows it working.
-- **`Weighting` is not exposed on `options`.** The fallback in step 2 hardcodes
-  the default. Tenney and Wilson agree exactly - same commas, same spellings -
-  over the temperament list and over every equal temperament to 99 in the 5, 7
-  and 11-limit, so nothing turns on it yet. It is no longer likely to go away:
-  two metric-free replacements were tried in the notation basis and both are
-  worse, for the reason given there.
-- **`shortest_stack` walks a box, like `Simplifier` does.** Minimising the
-  number of marks is an `L1` problem again, so the same pattern applies: reduce
-  the relations with `lll`, then walk `WIDTH` either way and settle ties on the
-  counts. Nothing over the list or any equal temperament to 99 comes within the
-  box of its edge - checked by instrumenting the walk - but it is a bounded
-  search, not a proof, and a subgroup wide enough to need a larger `WIDTH` would
-  fail quietly rather than loudly.
 - **Whether `225/224` may be an accidental: resolved, no.** The `{2, 3, p}`
   support rule is a real constraint, not just an accident of how accidentals
   are derived. Everything hangs off a prime having exactly one accidental -

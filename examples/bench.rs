@@ -49,13 +49,13 @@ fn main() {
             .collect();
         let coordinates: Vec<Vec<i64>> = intervals
             .iter()
-            .map(|interval| notation.to_notation(interval).unwrap())
+            .map(|interval| notation.spell(interval).unwrap())
             .collect();
 
         let mut i = 0;
         time("Notation::to_notation", 1_000_000, || {
             i = (i + 1) % intervals.len();
-            std::hint::black_box(notation.to_notation(&intervals[i]).unwrap());
+            std::hint::black_box(notation.spell(&intervals[i]).unwrap());
         });
 
         let mut i = 0;

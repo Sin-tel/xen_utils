@@ -67,7 +67,7 @@ fn show(name: &str, t: &Temperament) {
     };
     let recommended = Notation::from_temperament(t).expect("the run is not empty");
     for n in &options {
-        let mark = if n.mapping() == recommended.mapping() {
+        let mark = if n.generators() == recommended.generators() {
             "->"
         } else {
             "  "
@@ -81,7 +81,7 @@ fn show(name: &str, t: &Temperament) {
                 let mut harmonic = vec![0i64; subgroup.dim()];
                 harmonic[index] = 1;
                 harmonic[0] = -(subgroup.to_cents(&harmonic) / 1200.0).floor() as i64;
-                let coordinates = n.to_notation(&harmonic).unwrap();
+                let coordinates = n.spell(&harmonic).unwrap();
                 let marks: i64 = coordinates[2..].iter().map(|c| c.abs()).sum();
                 format!(
                     "{}={} ({marks})",
@@ -95,7 +95,7 @@ fn show(name: &str, t: &Temperament) {
             n.rank(),
             accidentals.join(" "),
             spelling.join(" "),
-            n.mapping()
+            n.generators()
         );
     }
 }
