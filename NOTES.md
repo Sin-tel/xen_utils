@@ -4,8 +4,6 @@ What the library does and why it does it that way. The code is the reference for
 what is implemented; this is for the reasoning, and for what is still open.
 Everything stated here was checked against the code at the time of writing.
 
-`math.md` has the algebra. This does not repeat it.
-
 ## The model
 
 A **temperament** is a surjection `T : Z^n -> Z^r` from the interval vectors of a
@@ -20,7 +18,7 @@ coordinate is an accidental mark.
 
 Just intonation is a useful fiction about the temperament. The approximations
 matter, but in 41et `14/11` and `81/64` **are** one note, and so are `E`, `vvvF`
-and `vB#`.
+and `^^D#`.
 
 ## A notation is its generators
 
@@ -270,9 +268,9 @@ since a list of one may be the spelling they already have.
 
 ## Everything here walks a box, and every box needs a reduced basis
 
-`shortest_stack`, `respell`, `simplify` and the examples all do the same thing -
-seed a point, then walk a bounded box around it under the norm actually wanted -
-and the same two mistakes were made in each.
+`respell`, `simplify` and the examples all do the same thing - seed a point,
+then walk a bounded box around it under the norm actually wanted - and the
+same two mistakes were made in each.
 
 **Reduce the basis first, against the form the search measures with.**
 Unreduced, 41et's enharmonics come back as "the octave is 41 ups" and "the fifth
@@ -287,11 +285,6 @@ costs - four for a fifth, forty nine for a mark.
 it can be far out: a two-accidental notation once produced a spelling fifteen
 marks from the best one, and orwell's replacement for `64/63` sat six relations
 away from `225/224`.
-
-`lll` and `nearest_plane` used to read `basis[0]` before checking for an empty
-basis, so both `Notation::build` and `Simplifier::new` guarded the call. Fixed
-upstream in `diophantine` `a4a7cbe`; the guards are gone and `LLL_DELTA` is
-shared from `util` rather than declared twice.
 
 ## What the derivation used to do, and why it stopped
 
