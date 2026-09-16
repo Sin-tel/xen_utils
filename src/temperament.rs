@@ -1,9 +1,12 @@
 //! Regular temperaments as integer linear maps.
 
-use diophantine::{Matrix, eye, hnf, kernel_left, kernel_right, lll, saturation, transpose};
+use diophantine::{
+    Matrix, eye, hnf, kernel_left, kernel_right, lll, saturation, solve_diophantine, transpose,
+};
 
 use crate::Error;
 use crate::primes::Subgroup;
+use crate::util::{column, first_column};
 
 /// A regular temperament: a linear map from the interval vectors of a just
 /// intonation subgroup to a free abelian group of lower rank.
@@ -179,6 +182,20 @@ impl Temperament {
             .iter()
             .map(|row| row.iter().zip(interval).map(|(a, b)| a * b).sum())
             .collect())
+    }
+
+    /// Return a representative just interval that maps to the given tempered interval.
+    /// This gives just one possibility out of many.
+    pub fn map_inverse(&self, interval: &[i64]) -> Result<Vec<i64>, Error> {
+        if interval.len() != self.rank() {
+            return Err(Error::InvalidDimensions(format!(
+                "interval has {} entries, expected {}",
+                interval.len(),
+                self.rank()
+            )));
+        }
+        let solution = solve_diophantine(&self.mapping, &column(&interval))?;
+        Ok(first_column(&solution))
     }
 }
 

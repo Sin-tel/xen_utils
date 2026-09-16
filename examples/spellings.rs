@@ -2,10 +2,9 @@
 
 use xen_utils::{Notation, Simplifier, Subgroup, Temperament};
 
-// TODO: `reached` breaks on valid ETs.
 const DIVISIONS: i64 = 41;
 const SUBGROUP: &str = "2.3.5.7.11";
-const SHOWN: usize = 5;
+const SHOWN: usize = 3;
 
 fn main() {
     for (divisions, subgroup) in [(12, "2.3.5"), (DIVISIONS, SUBGROUP)] {
@@ -31,7 +30,7 @@ fn main() {
         println!("\n{:>4}  {:>9}  ways to write it", "step", "reading");
 
         for steps in 0..divisions + 1 {
-            let interval = reached(&subgroup, &temperament, steps, divisions);
+            let interval = temperament.map_inverse(&vec![steps]).unwrap();
             let seed = notation.spell(&interval).unwrap();
             let reading = simplifier.simplify(&interval).unwrap();
             let (num, den) = subgroup.to_ratio(&reading).unwrap();
@@ -49,23 +48,4 @@ fn main() {
             );
         }
     }
-}
-
-/// Some just interval worth `step` steps: the shortest stack of fifths that
-/// reaches it, octave reduced so that the notes come out in one register. Any one will do: every spelling of it is in the same
-/// coset, and the simplifier reduces every interval worth the same alike.
-fn reached(subgroup: &Subgroup, t: &Temperament, step: i64, divisions: i64) -> Vec<i64> {
-    let mut fifth = vec![0i64; subgroup.dim()];
-    (fifth[0], fifth[1]) = (-1, 1);
-    let per_fifth = t.map(&fifth).unwrap()[0];
-    for count in (0..=divisions).flat_map(|k| [k, -k]) {
-        let remainder = step - count * per_fifth;
-        if remainder.rem_euclid(divisions) == 0 {
-            let mut interval = vec![0i64; subgroup.dim()];
-            (interval[0], interval[1]) = (-count, count);
-            interval[0] -= (t.map(&interval).unwrap()[0] - step) / divisions;
-            return interval;
-        }
-    }
-    unreachable!("the fifth chain reaches every step of a notatable equal temperament")
 }
