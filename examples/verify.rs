@@ -2,16 +2,16 @@
 //! `data/temperaments.txt` and every equal temperament up to 72 over a few
 //! subgroups.
 //!
-//!   * each generator maps to its unit vector, so `assemble` inverted right;
-//!   * `ker(notation)` is contained in `ker(temperament)`, i.e. the notation
-//!     never spells two intervals the temperament tells apart the same way;
-//!   * the kernel and the enharmonic lattice account between them for every
-//!     comma the temperament tempers out, so neither is too small;
-//!   * kernels nest: a smaller notation spells alike everything a larger one
-//!     does, so a larger notation's spelling can be simplified onto a smaller
-//!     one's;
-//!   * ranks run upwards one at a time, and the first has the rank of the
-//!     temperament where one of that rank exists at all.
+//!   * there are exactly as many enharmonics as the notation has rank over the
+//!     temperament, and each is worth nothing without being the unison;
+//!   * every prime can be written, and reading the spelling back gives the
+//!     pitch it was asked for;
+//!   * no spelling in the same coset is cheaper to write - checked by walking
+//!     wider than `respell` does and writing the cost out a second time, so
+//!     that this checks the answer rather than restating how it was found;
+//!   * ranks run upwards one at a time, each notation keeping everything the
+//!     one before it kept, and the first has the rank of the temperament where
+//!     one of that rank exists at all.
 
 use std::error::Error;
 
