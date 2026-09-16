@@ -82,12 +82,6 @@ fn prime_factors(mut n: u64) -> Vec<(u64, u32)> {
 /// Every basis must start with `2.3`. The notation system built on top of this
 /// is a chain of pythagorean fifths, so the octave and the fifth must both be
 /// available; subgroups such as `2.5.7` are not supported.
-///
-/// Intervals of the subgroup are integer vectors of exponents over the basis:
-/// the vector `e` denotes the rational `prod(b_i ^ e_i)`, and
-/// [`factorize`](Self::factorize) and [`to_ratio`](Self::to_ratio) convert
-/// between the two. Nothing outside this type should assume the basis is a
-/// full prime limit.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Subgroup {
     basis: Vec<u32>,
@@ -131,7 +125,7 @@ impl Subgroup {
         &self.basis
     }
 
-    /// The rank of the subgroup, i.e. the length of an interval vector over it.
+    /// The dimension of the subgroup, i.e. the length of an interval vector over it.
     pub fn dim(&self) -> usize {
         self.basis.len()
     }

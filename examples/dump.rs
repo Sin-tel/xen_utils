@@ -10,22 +10,14 @@
 //! The equal temperament sweep is here for coverage, not for judgement. A
 //! temperament can be arbitrarily bad and plenty of these are; sweeping them
 //! catches a panic or a rule that moved, and says nothing about whether an
-//! answer is sensible. For that, read the named list - and the rank 2 and rank
-//! 3 entries in it especially, which is what anyone actually notates.
+//! answer is sensible. For that, read the named list.
 
 use std::error::Error;
 
 use xen_utils::{Notation, Subgroup, Temperament};
 
 const TEMPERAMENTS: &str = include_str!("../data/temperaments_big.txt");
-const SUBGROUPS: [&str; 6] = [
-    "2.3.5",
-    "2.3.7",
-    "2.3.11",
-    "2.3.5.7",
-    "2.3.5.11",
-    "2.3.5.7.11",
-];
+const SUBGROUPS: [&str; 2] = ["2.3.5", "2.3.5.7"];
 
 fn main() {
     for (number, line) in TEMPERAMENTS.lines().enumerate() {

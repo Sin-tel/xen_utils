@@ -14,11 +14,13 @@
 
 use xen_utils::{Notation, Simplifier, Subgroup, Temperament};
 
+// TODO: `reached` breaks on valid ETs.
 const DIVISIONS: i64 = 41;
+const SUBGROUP: &str = "2.3.5.7.11";
 const SHOWN: usize = 5;
 
 fn main() {
-    for (divisions, subgroup) in [(12, "2.3.5"), (DIVISIONS, "2.3.5.7.11")] {
+    for (divisions, subgroup) in [(12, "2.3.5"), (DIVISIONS, SUBGROUP)] {
         let subgroup: Subgroup = subgroup.parse().unwrap();
         let temperament = Temperament::et(divisions, &subgroup).unwrap();
         let options = Notation::options(&temperament).unwrap();
@@ -40,7 +42,7 @@ fn main() {
         );
         println!("\n{:>4}  {:>9}  ways to write it", "step", "reading");
 
-        for steps in 0..divisions {
+        for steps in 0..divisions + 1 {
             let interval = reached(&subgroup, &temperament, steps, divisions);
             let seed = notation.spell(&interval).unwrap();
             let reading = simplifier.simplify(&interval).unwrap();
@@ -73,8 +75,7 @@ fn reached(subgroup: &Subgroup, t: &Temperament, step: i64, divisions: i64) -> V
         if remainder.rem_euclid(divisions) == 0 {
             let mut interval = vec![0i64; subgroup.dim()];
             (interval[0], interval[1]) = (-count, count);
-            // Octave reduce, which the fifth stack above does not.
-            interval[0] -= (subgroup.to_cents(&interval) / 1200.0).floor() as i64;
+            interval[0] -= (t.map(&interval).unwrap()[0] - step) / divisions;
             return interval;
         }
     }

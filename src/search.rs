@@ -88,9 +88,9 @@ impl<'a> Search<'a> {
         let plan = self.plan()?;
         (0..=plan.optional.len())
             .map(|extras| {
-                Notation::build(
+                Notation::from_accidentals(
                     self.temperament,
-                    select(&self.accidentals, &plan.kept(extras)),
+                    &select(&self.accidentals, &plan.kept(extras)),
                 )
             })
             .collect()
