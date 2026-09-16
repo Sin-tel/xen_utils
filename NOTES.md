@@ -62,18 +62,15 @@ are the same note.
 ## Accidentals
 
 Derived, not given. For each prime beyond 3, shift it along the fifth chain by
-0, 1, -1, 2, -2, ... fifths, octave-reduce each candidate to within a tritone of
-a unison, and take the first that lands within **half an apotome**
-(`MAX_ACCIDENTAL_CENTS`, 56.84 cents, `600 * (7 * log2(3) - 11)`).
-
-That bound is load-bearing. Anything wider is closer to the neighbouring point
-of the fifth chain, so it belongs there as a sharp or a flat instead. It is also
-what makes a mark and a sharp commensurable further down.
+0, 1, -1, 2, -2, ... fifths, octave-reduce each candidate, and take the first that
+lands within half a sharp.
+(`MAX_ACCIDENTAL_CENTS`, 56.84 cents, `1200*log2(sqrt(2187/2048))`).
 
 ```
-5  -> 81/80     21.5c      13 -> 1053/1024  48.3c
-7  -> 64/63     27.3c      17 -> 4131/4096  14.7c
-11 -> 33/32     53.3c      19 -> 513/512     3.4c
+5  -> 81/80      21.5c
+7  -> 64/63      27.3c
+11 -> 33/32      53.3c
+13 -> 1053/1024  48.3c
 ```
 
 The 13, 17 and 19 choices are the Helmholtz-Ellis ones, for free. `33/32` is the
@@ -86,7 +83,7 @@ for free.
 
 ## Ranking spellings: a sharp is worth two marks
 
-`apotomes` in `notation.rs` is the whole of it:
+`spelling_cost` in `notation.rs` is the whole of it:
 
 ```
 7 * marks + 2 * |fifths - 2|
@@ -104,38 +101,10 @@ Ties fall back to the coordinates, so the order never depends on how the search
 was walked. The octave does not appear: register costs nothing to write, and the
 pitch fixes it once the rest is chosen.
 
-Out of this, without being told anything about conventional practice:
-
-```
-12et   C  Db  D  Eb  E  F  F#  G  Ab  A  Bb  B
-```
-
-with the sharps as the second choice each time and the tritone an honest tie.
-
-### What the other counts do
-
-Three readings were tried and only the test suite separated them.
-
-| measure | result |
-| --- | --- |
-| `7 * marks + \|f\|`, from `C` | 22et writes `D#`, never using the comma it keeps |
-| `7 * marks + 2 * beyond the naturals` | differs on 12 of ~900 notations, all 11et and 13et, where it stops using an accidental the notation keeps |
-| `7 * marks + 2 * \|f - 2\|` | in the code |
-
-Two cheaper counts fail outright, and both fail the same way - by letting one
-kind of symbol be preferred at any price:
-
-- **Fewest marks, sharps only a tie-break.** An equal temperament whose fifth
-  chain reaches every pitch always has, far out along it, a spelling with no
-  marks and six sharps. Over 41et the first two entries survive a wider search on
-  7 of 41 pitches.
-- **Fewest symbols**, marks and sharps counted alike. Stable, but it cannot
-  separate `C##` from `Ebb`, and it puts 41et's `B#` ahead of `^C`.
-
 ## The search: which accidentals to keep
 
 That is all `Search` decides, and it is the only thing nothing downstream can do:
-it picks the generators, hence the enharmonics, hence the notation. 226 lines.
+it picks the generators, hence the enharmonics, hence the notation.
 
 Each accidental falls into one of four classes:
 
@@ -190,7 +159,7 @@ one of another kind, so `[3]` is the one wanted.
 Flattone writes `11/8` as `F#5` where just intonation has `^F5`, and that is
 still an `F`, so there is no reason to take on an accidental for 11.
 
-Where nothing qualifies the recommendation falls back to the last notation.
+Where nothing qualifies the recommendation falls back to the first notation.
 
 **This rule is the weakest thing in the library.** Nothing stops a notation
 keeping its nominals by stacking a pile of marks, and nothing says the smallest
@@ -200,40 +169,13 @@ anything in the list, which is not the same as being right.
 ## Simplifying
 
 Which interval a tempered pitch "is" is a closest vector problem on the
-temperament's comma lattice. Three things about it took working out and are
-settled.
-
-**Which lattice.** The whole comma lattice, `ker T`. Not the enharmonics, which
-stay inside what the notation's generators span and so could never answer `7/4`
-in a notation over `{2, 3, 5}`.
-
-**Which basis.** Just intonation coordinates. Wilson and Tenney weight *prime
-exponents*, and there is no prime on the fifth axis, so weighting notation
-coordinates would mean nothing.
+temperament's comma lattice.
 
 **Which norm.** Wilson, `sopfr`, the sum of the prime factors of numerator and
 denominator. It is an **L1** norm and the lattice algorithms take a quadratic
 form, so the two disagree: under L2 a step of 41et is `45/44`, under L1 it is
 `64/63`. So `lll` and `cvp_exact` seed the search and a bounded walk finishes it
 under `sopfr`, one ball at a time out to `SEARCH_RADIUS`.
-
-What comes out for 41et is the interval table anyone would write by hand:
-
-```
-1/1  64/63  25/24  21/20  16/15  12/11  10/9  9/8  8/7  7/6  32/27  6/5
-11/9  5/4  14/11  9/7  21/16  4/3  27/20  11/8  7/5  10/7 ...
-```
-
-**The answer is the first of a list.** The walk passes over every interval in
-every ball it steps through, so keeping them costs nothing and `candidates`
-returns them sorted. That is a neighbourhood rather than the whole coset, so only
-the right end of the list means anything.
-
-One dead end, for the record: **leaving the octave out of the cost is wrong**.
-Free powers of two let the search buy any number of them to avoid one high prime,
-which inverts exactly the identifications wanted - 41et's `14/11` becomes
-`81/64` and its `9/7` becomes `32/25`. `sopfr` is a statement about the ratio and
-the 2s are part of the ratio.
 
 ## Performance
 
@@ -251,7 +193,7 @@ Simplifier::candidates(8)    54 us
 
 `to_just` is a matrix multiply and not worth a second thought. **`spell` is no
 longer free**: it used to be one too, at the same 39 nanoseconds, and it is now a
-diophantine solve, a closest vector and a box walked under `apotomes`. Still
+diophantine solve, a closest vector and a box walked under `spelling_cost`. Still
 cheap enough to spell every visible note on a redraw - a hundred notes is a
 quarter of a millisecond - but no longer in the same class, and not to be called
 in a loop that does not need it.
@@ -278,48 +220,13 @@ is 24 ups", and a box around those finds `vvvvvvvD` at seven marks while never
 reaching `vB#` at one mark and one sharp. Reducing against a *different* form
 from the one the search uses is the subtler version of the same error: the basis
 comes out short in the wrong sense. `Notation::weights` is built once and used
-for both the reduction and the search, carrying the squares of what `apotomes`
+for both the reduction and the search, carrying the squares of what `spelling_cost`
 costs - four for a fifth, forty nine for a mark.
 
 **Seed near the answer.** `solve_diophantine` hands back any solution at all, and
 it can be far out: a two-accidental notation once produced a spelling fifteen
 marks from the best one, and orwell's replacement for `64/63` sat six relations
 away from `225/224`.
-
-## What the derivation used to do, and why it stopped
-
-Worth keeping because it bounds what a search can usefully decide.
-
-The notation used to be a linear map `N` from just intonation to notation
-coordinates, built by stacking the generators on a fixed comma per dropped
-accidental into a square matrix and inverting it. Choosing those commas was most
-of the search: a preference order over stacks of the accidentals still kept, and
-a metric fallback when the fifth chain had to be walked.
-
-It was deleted because **nothing downstream could see which comma was picked.**
-Two notations over 41et built from different comma rules have, checked by Hermite
-normal form, *identical* enharmonic lattices - `[[1, 0, -41], [0, 1, -24]]` for
-both - because `pitch` is fixed by where the generators go and the commas do not
-enter it. Their kernels genuinely differ, so they differ in which just intervals
-they spell alike; but every spelling either could give lies in the same coset of
-the same lattice, and `respell` ranks that coset directly.
-
-Three things were measured on the way and are worth not re-deriving:
-
-- **The run never depended on the commas.** Comparing rank and accidentals kept
-  across ~900 notations under two different comma rules: zero differing lines.
-- **The preference order decided almost nothing.** Replacing it with any
-  solution at all moved 17 of 912 lines, every one the same shape: the `33/32`
-  comma of an 11-limit notation keeping both `81/80` and `64/63`.
-- **Picking the spelling from the coset instead makes the comma irrelevant**, and
-  is cheaper on the page - 28 marks against 33 over 41et. That is the design now.
-
-The thing that had to be accepted to get here is that spelling stops being a
-homomorphism. It costs nothing in practice because notation coordinates are the
-state: transposing is a notation-coordinate operation and stays exact, and the
-ranking only runs when someone asks. But spelling a chord note by note from just
-intonation ranks each note independently, so anything wanting a consistent chord
-should transpose in notation coordinates rather than respell each member.
 
 ## Loose ends and known limits
 
@@ -344,7 +251,7 @@ should transpose in notation coordinates rather than respell each member.
   `1/34560` of norm 30.
 - **`respell` is a bounded search too**, but barely. The seed is an exact
   closest vector, so the walk only corrects for the quadratic form standing in
-  for `apotomes`, and that correction is never more than one step over anything
+  for `spelling_cost`, and that correction is never more than one step over anything
   swept: a width of 1 gives the same answers as a width of 5 everywhere, while a
   width of 0 moves 260 lines and fails `verify` 117 times. `RESPELL_WIDTH` is 2,
   for the margin. `verify` checks the answers independently, walking wider than
@@ -356,7 +263,7 @@ should transpose in notation coordinates rather than respell each member.
 - **An accidental defined as one step** - what ups and downs uses in general - is
   still not available, which is why some equal temperaments get no notation.
 - **Accidentals off the derived set: the maths does not care, the names do.**
-  `build` takes whatever list it is given, and everything downstream - `pitch`,
+  `from_accidentals` takes whatever list it is given, and everything downstream - `pitch`,
   `spell`, `respell`, the enharmonics, and all of `Search`'s classification -
   treats the accidentals as an opaque list. Handed Johnston's pair, `81/80` and
   the septimal `36/35`, it builds and spells correctly: `7/4` comes out
@@ -370,7 +277,7 @@ should transpose in notation coordinates rather than respell each member.
     which prime an accidental corrects and by how many fifths, and a mixed-axis
     accidental has no single answer.
   - **The half-apotome bound is unenforced** on a supplied accidental, and
-    `apotomes` charging seven per mark is only sound because of it.
+    `spelling_cost` charging seven per mark is only sound because of it.
   - `Search::new` and `from_ji` derive one accidental per prime and would need a
     supplied list instead. Mechanical.
 
@@ -384,7 +291,7 @@ should transpose in notation coordinates rather than respell each member.
 ## Where the code lives
 
 - `notation.rs` - the `Notation` type: `generators`, `pitch`, `enharmonics`,
-  `spell`, `respell`, `note`, the ranking `apotomes`, and the derivation of a
+  `spell`, `respell`, `note`, the ranking `spelling_cost`, and the derivation of a
   single accidental.
 - `search.rs` - `Notation::options`, and only the choice of which accidentals to
   keep. Tested through `options`.
