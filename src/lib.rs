@@ -4,8 +4,7 @@
 //! basis of a just intonation [`Subgroup`], such as `2.3.7`. A regular
 //! temperament is a linear map from such a vector space to a free abelian
 //! group of lower rank; see [`Temperament`], which carries its subgroup
-//! along with its mapping. All integer linear algebra (kernels, Hermite
-//! normal form, saturation) is provided by the `diophantine` crate.
+//! along with its mapping.
 
 // This lint tends to reduce clarity for loops over matrices.
 #![allow(clippy::needless_range_loop)]

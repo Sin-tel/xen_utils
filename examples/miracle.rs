@@ -1,12 +1,7 @@
 //! Twelve miracle generators, notated three ways.
 //!
 //! Miracle's generator is `15/14`, and the temperament says six of them are a
-//! fifth, so twelve are `9/4`. Unlike `cargo run --example simplify`, which
-//! walks an equal temperament's one accidental, miracle is rank 2 and offers a
-//! run of three notations rather than one; this walks the generator chain
-//! through all three side by side instead of only the recommended one, marked
-//! `*` in the header - the smallest that still spells `11/9` on `E` rather
-//! than `F`.
+//! fifth, so twelve are `9/4`.
 
 use xen_utils::{Notation, Simplifier, Subgroup, Temperament};
 

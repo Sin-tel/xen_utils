@@ -7,40 +7,18 @@ use crate::notation::Notation;
 use crate::primes::Subgroup;
 use crate::util::{LLL_DELTA, subtract};
 
-/// How far to reduce the lattice before searching it.
 /// How far around the best so far to look, in each direction along each reduced
 /// basis vector. The search steps by this much until nothing nearer is better,
 /// so the radius bounds one step rather than the whole walk.
-///
-/// A radius of 1 is not enough even iterated, since it can settle in a hollow
-/// two steps wide. A radius of 2 walks as far as a radius of 3 does for every
-/// interval within nineteen generators of the unison, over 59109 swept; the
-/// stalls past that are twenty octaves out and more, where the norm is minimized
-/// by trading a pile of one prime for a pile of another and the walk has to
-/// cross the whole lattice to find it. Those are not intervals anyone writes
-/// down, so the walk stops where it stops.
 const SEARCH_RADIUS: i64 = 2;
 
 /// Rewrites a just interval as the simplest one the temperament makes equal to
 /// it.
 ///
 /// The intervals a temperament calls the same are the cosets of its comma
-/// lattice, so simplifying is a closest vector problem: shift the interval by
-/// whatever comma leaves the least behind. The lattice is reduced once, on
-/// construction, so that simplifying many intervals is cheap.
+/// lattice, so simplifying is a closest vector problem.
 ///
-/// This depends on nothing but the [temperament](Notation::temperament) being
-/// notated, so every notation of a temperament simplifies alike and only the
-/// spelling of the answer differs. Where the temperament tempers nothing out
-/// there is no lattice and nothing to do.
-///
-/// "Simplest" is the Wilson norm [`sopfr`], the sum of the prime factors of
-/// numerator and denominator - `81/80` is 25 and `45/44` is 26, so a step of
-/// 41et is the syntonic comma rather than the undecimal one. That norm is an L1
-/// norm, which no lattice algorithm takes, so the quadratic Wilson norm stands
-/// in for the reduction and the closest vector search, and the answer they give
-/// seeds a walk under the norm actually wanted, one [ball](SEARCH_RADIUS) at a
-/// time.
+/// "Simplest" here means the Wilson norm [`sopfr`].
 #[derive(Debug, Clone)]
 pub struct Simplifier {
     subgroup: Subgroup,
@@ -84,16 +62,8 @@ impl Simplifier {
             .swap_remove(0))
     }
 
-    /// The simplest `count` just intervals the temperament makes equal to
-    /// `interval`, simplest first, for an end user to cycle through.
-    ///
-    /// The walk passes over every one of these on its way, so they cost nothing
-    /// beyond keeping them. What comes back is everything it saw, sorted, which
-    /// is the ball it settled in and the balls it walked through to get there -
-    /// a few thousand intervals for an equal temperament of the 11 limit. That
-    /// is a neighbourhood rather than the whole coset, so it is the right end of
-    /// the list that is worth trusting, and asking for more than a handful will
-    /// eventually run out of sensible answers before it runs out of intervals.
+    /// Returns a sorted list of `count` just intervals the temperament makes equal to
+    /// `interval`, simplest first.
     ///
     /// # Errors
     /// Returns [`Error::InvalidDimensions`] if `interval` does not have one
@@ -130,19 +100,13 @@ impl Simplifier {
     /// looking `radius` along each reduced basis vector at a time, and returns
     /// everything it passed over, simplest first.
     ///
-    /// Ties under [`sopfr`] are common, since swapping which primes carry the
-    /// interval often costs nothing; the quadratic norm settles most of them and
-    /// the coordinates themselves settle the rest, so that the order never
-    /// depends on the order the ball is walked in. Sorting `(rank, candidate)`
-    /// pairs is exactly this: the coordinates are already the tie-break the
-    /// comment above promises, once the rank ties.
-    ///
-    /// This runs for every point of a ball of `width.pow(lattice.len())`
-    /// points, possibly several balls deep, so it is written to allocate once
-    /// per point (the candidate itself) rather than the handful `combination`,
-    /// `subtract` and a coordinate-carrying key each cost: `simplify` is on the
-    /// path a UI redraws from, not just a one-off.
+    /// Ties under [`sopfr`] are common, so we use the quadratic norm and
+    /// the coordinates themselves to break ties.
     fn search(&self, seed: &[i64], radius: i64) -> Matrix<i64> {
+        // This runs for every point of a ball of `width.pow(lattice.len())`
+        // points, possibly several balls deep, so it is written to allocate once
+        // per point.
+
         let width = (2 * radius + 1) as usize;
         let mut best = seed.to_vec();
         let mut seen = Vec::new();
@@ -185,9 +149,7 @@ impl Simplifier {
     }
 
     /// What the search minimizes: the Wilson norm, and the quadratic norm
-    /// standing in for it as a tie-break. Cheap on purpose - no allocation - so
-    /// that ranking every point of a ball costs nothing beyond visiting it; the
-    /// interval itself is the tie-break beneath this, once paired up with it.
+    /// standing in for it as a tie-break.
     fn rank(&self, interval: &[i64]) -> (i64, i64) {
         let primes = self.subgroup.basis();
         let squared = interval

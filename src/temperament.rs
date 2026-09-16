@@ -13,19 +13,8 @@ use crate::primes::Subgroup;
 /// normal form. Two mapping matrices describe the same temperament exactly
 /// when they have the same HNF.
 ///
-/// A mapping that is not already saturated is refused rather than silently
-/// saturated: saturating it changes which temperament it describes, and
-/// `24et` over `2.3.5` is the case that makes this concrete. Both primes map
-/// to twice an odd number there, so it is contorted, and it saturates to
-/// `12et`, a different temperament with half the steps per octave. Returning
-/// that silently would answer a question nobody asked; erroring says the
-/// mapping given does not describe a valid temperament as such, and `24et`
-/// over `2.3.5.11` is what to ask for instead, whose quartertone breaks the
-/// contorsion.
-///
-/// The [`Subgroup`] the mapping is over is carried along with it, since a
-/// mapping matrix means nothing without knowing which rationals its columns
-/// refer to.
+/// A mapping that is not already saturated is refused, since it does not
+/// describe a valid temperament.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Temperament {
     mapping: Matrix<i64>,
@@ -37,7 +26,7 @@ impl Temperament {
     /// generators, columns = basis elements).
     ///
     /// The mapping is reduced to Hermite normal form, so the result does not
-    /// depend on which basis of generators the input happened to use.
+    /// depend on which basis of generators the input used.
     ///
     /// # Errors
     /// Returns [`Error::Unsupported`] if the mapping is contorted, i.e. its

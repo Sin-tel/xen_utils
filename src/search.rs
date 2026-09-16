@@ -2,14 +2,6 @@
 //!
 //! The whole of the public surface is that one function, so this module is
 //! tested through it rather than on its own.
-//!
-//! The search decides **which accidentals a notation keeps**, and that is all it
-//! decides. A notation is its generators: where they sit in the temperament
-//! fixes the pitch of every written note and which written notes are the same
-//! pitch, and there is no map from just intonation to choose. So the shape of
-//! the search is: derive one accidental per prime beyond 3, work out what each
-//! is worth to the temperament, and check them one at a time to see which can be
-//! dropped.
 
 use diophantine::Matrix;
 
@@ -20,15 +12,15 @@ use crate::util::{is_zero, select};
 
 /// The derivation of the notations one temperament offers.
 ///
-/// Everything the search does hangs off the accidentals and what each is worth
-/// to the temperament, so those are worked out once here and the rest of the
+/// Everything the search does hangs off the accidentals and what each is maps
+/// to in the temperament, so those are worked out once here and the rest of the
 /// search is methods on them. Accidentals are passed around as indices into
 /// [`Self::accidentals`] throughout.
 pub(crate) struct Search<'a> {
     temperament: &'a Temperament,
     /// One accidental per prime beyond 3, in order of the primes.
     accidentals: Matrix<i64>,
-    /// What each accidental is worth to the temperament.
+    /// What each accidental maps to in the temperament.
     images: Matrix<i64>,
     /// The accidentals the temperament does not temper out. One it does temper
     /// out would raise by nothing, so it is never worth keeping.
@@ -102,17 +94,15 @@ impl<'a> Search<'a> {
         let candidates = self.candidates();
         let necessary = self.necessary(&candidates)?;
 
-        // The rest, in the order the run takes them on, passing over any worth
-        // exactly what one already kept is worth: that would only be the
-        // accidental already there over again. `81/80` and `64/63` being one
-        // interval is a property of 41et, not a second symbol to read.
+        // All other ones are optional, unless they map to the same interval
+        // as one before it.
         let mut optional: Vec<usize> = Vec::new();
         for index in candidates {
             if necessary.contains(&index) {
                 continue;
             }
             let mut present = necessary.iter().chain(&optional);
-            if !present.any(|&kept| same_worth(&self.images[kept], &self.images[index])) {
+            if !present.any(|&kept| equal_up_to_sign(&self.images[kept], &self.images[index])) {
                 optional.push(index);
             }
         }
@@ -123,24 +113,10 @@ impl<'a> Search<'a> {
         })
     }
 
-    /// The accidentals a notation may use, in the order the run takes them on:
-    /// by prime, except that an equal temperament puts the one worth a single
-    /// step first.
+    /// The accidentals a notation may use, in order.
     ///
-    /// An equal temperament notated with accidentals wants the finest of them to
-    /// be worth one step, which is the rule ups and downs is built on: with no
-    /// symbol for a single step, single steps can only be reached by walking the
-    /// fifth chain, which is not how anyone writes such a temperament. So if no
-    /// accidental is worth a single step, an equal temperament gets none at all,
-    /// and is left with the fifth chain if that reaches every note and with no
-    /// notation if it does not. 25et over `2.3.5` is the plain case: its chain
-    /// closes after five notes and its syntonic comma is worth two steps. The
-    /// answer there is a subgroup whose accidental does fit, not a coarser
-    /// accidental.
-    ///
-    /// This is the one place rank 1 is singled out, and it has to be: above rank
-    /// 1 no accidental can reach every pitch by itself, so there is nothing for
-    /// "worth one step" to generalise to.
+    /// For an equal temperament, we first look for an accidental that maps to
+    /// one step, since that one is preferred over all others.
     fn candidates(&self) -> Vec<usize> {
         if self.temperament.rank() != 1 {
             return self.useful.clone();
@@ -159,13 +135,7 @@ impl<'a> Search<'a> {
     }
 
     /// The smallest subset of `candidates` that makes a notation possible at
-    /// all, which every notation in the run therefore keeps.
-    ///
-    /// A notation of the same rank as the temperament keeps `rank - 2` of them,
-    /// so that is the smallest this can come to; where no such subset reaches
-    /// every pitch, the notation is forced to be larger. Keeping every candidate
-    /// works unless the candidates have been cut down, which only happens for an
-    /// equal temperament with no accidental worth a single step.
+    /// all.
     fn necessary(&self, candidates: &[usize]) -> Result<Vec<usize>, Error> {
         for size in 0..=candidates.len() {
             // Subsets in lexicographic order, so that the accidentals offered
@@ -193,7 +163,7 @@ impl<'a> Search<'a> {
         let subgroup = self.temperament.subgroup();
         if self.temperament.rank() == 1 {
             return Error::Unsupported(format!(
-                "the fifth chain of this equal temperament does not reach every note, and no accidental of {subgroup} is worth a single step of it"
+                "the fifth chain of this equal temperament does not reach every note, and no accidental of {subgroup} maps to a single step of it"
             ));
         }
         Error::Unsupported(format!(
@@ -203,9 +173,8 @@ impl<'a> Search<'a> {
     }
 }
 
-/// Whether two accidentals are worth the same to the temperament, so that one of
-/// them is the other over again. The two may point in opposite directions.
-fn same_worth(one: &[i64], other: &[i64]) -> bool {
+/// Two accidentals do the same thing if they agree up to sign.
+fn equal_up_to_sign(one: &[i64], other: &[i64]) -> bool {
     one == other || one.iter().zip(other).all(|(a, b)| *a == -b)
 }
 

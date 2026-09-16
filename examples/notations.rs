@@ -1,11 +1,5 @@
 //! Lists every notation each temperament in `data/temperaments.txt` offers,
 //! and how each one spells the primes it tempers.
-//!
-//! The first notation of a temperament is the smallest there is and the last
-//! keeps every accidental worth keeping; an equal temperament offers the whole
-//! run between them. Each row gives the rank of the notation, its accidentals,
-//! and its spelling of every prime beyond 3, octave reduced. Run with
-//! `cargo run --example notations`.
 
 use std::error::Error;
 

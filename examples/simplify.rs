@@ -2,9 +2,8 @@
 //!
 //! The accidental of 41et's recommended notation is worth one step, so stacking
 //! ups on `C` walks through the whole scale and arrives back at `C` an octave
-//! later. The intervals that stack reaches are absurd - eleven of them is
-//! `81/80` eleven times over - and every one of them is equal, in 41et, to
-//! something an ear would recognise. `Simplifier` finds that something.
+//! later. The intervals that stack reaches are absurd - a fifth is reached by
+//! (81/80)^24.
 
 use xen_utils::{Notation, Simplifier, Subgroup, Temperament};
 

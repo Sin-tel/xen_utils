@@ -1,16 +1,4 @@
-//! The candidate **spellings** of a pitch, for an end user to cycle through.
-//!
-//! One pitch is any number of written notes, and nothing in the temperament
-//! prefers one of them: they differ by an enharmonic, which is what the
-//! temperament calls a unison and the notation still writes apart. So this is a
-//! question the notation has to answer with a ranking of its own, and the
-//! ranking is what a note costs to write - seven half-apotomes for an
-//! accidental mark and two for a fifth away from the middle of the naturals.
-//!
-//! This is one of the two questions a pitch has; `cargo run --example
-//! candidates` is the other. They are separate: which just interval is meant
-//! and how the note is written are decided by different things, and 12et
-//! writing `D` is not an opinion about `9/8` against `10/9`.
+//! The candidate spellings of a pitch in an equal temperament.
 
 use xen_utils::{Notation, Simplifier, Subgroup, Temperament};
 

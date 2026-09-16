@@ -1,14 +1,4 @@
-//! The candidate **readings** of a pitch, for an end user to cycle through.
-//!
-//! One tempered pitch is any number of just intervals, and which one it "is"
-//! depends on what is being played. The simplifier ranks them, so the answer it
-//! gives is the first of a list rather than the only one there is.
-//!
-//! This is one of the two questions a pitch has; `cargo run --example spellings`
-//! is the other. They are separate, and the spelling does not appear here for a
-//! reason: every reading on this list is the same pitch, so the notation writes
-//! them all the same way. Which just interval is meant and how the note is
-//! written are decided by different things and neither constrains the other.
+//! The candidate just intervals of a pitch in an equal temperament.
 
 use xen_utils::{Notation, Simplifier, Subgroup, Temperament, simplify::sopfr};
 

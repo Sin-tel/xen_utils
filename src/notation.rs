@@ -1249,7 +1249,7 @@ mod tests {
         let rank = 5;
         let weights = spelling_cost_l2(5);
 
-        // Octaves are free for the l1 cost
+        // Octaves are free only for the l1 cost
         assert_eq!(spelling_cost(&vec![5, 2, 0, 0, 0]), 0);
 
         for i in 1..rank {

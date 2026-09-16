@@ -1,9 +1,6 @@
 //! Rough timings of the operations expected to run on a hot path: `simplify`,
 //! `candidates`, `spell`, `respell` and `to_just`. Building a `Notation` or a
 //! `Simplifier` is not measured, since that happens once and is reused.
-//!
-//! No harness, no statistics - just wall time over enough iterations that
-//! noise averages out. Good enough to tell "negligible" from "worth fixing".
 
 use std::time::Instant;
 
