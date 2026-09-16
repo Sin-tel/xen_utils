@@ -1,13 +1,14 @@
-//! The candidate readings of an interval, for an end user to cycle through.
+//! The candidate **readings** of a pitch, for an end user to cycle through.
 //!
 //! One tempered pitch is any number of just intervals, and which one it "is"
 //! depends on what is being played. The simplifier ranks them, so the answer it
 //! gives is the first of a list rather than the only one there is.
 //!
-//! These four steps of 41et are the ones where the simplest reading is not the
-//! most convenient spelling, so they are where having the rest of the list
-//! matters: `14/11` and `11/7` are the ones worth reading, and cost three marks
-//! apiece, while the runners up are spelled plainly and mean much less.
+//! This is one of the two questions a pitch has; `cargo run --example spellings`
+//! is the other. They are separate, and the spelling does not appear here for a
+//! reason: every reading on this list is the same pitch, so the notation writes
+//! them all the same way. Which just interval is meant and how the note is
+//! written are decided by different things and neither constrains the other.
 
 use xen_utils::{Notation, Simplifier, Subgroup, Temperament, simplify::sopfr};
 
@@ -30,14 +31,16 @@ fn main() {
 
         let tempered = 1200.0 * steps as f64 / DIVISIONS as f64;
         let searched = simplifier.candidates(&stacked, usize::MAX).unwrap().len();
-        println!("{steps} steps of {DIVISIONS}et, {tempered:.1}c - {searched} intervals searched");
+        let written = notation.note(&notation.spell(&stacked).unwrap());
+        println!(
+            "{steps} steps of {DIVISIONS}et, {tempered:.1}c, written {written}, {searched} searched"
+        );
 
         for candidate in simplifier.candidates(&stacked, SHOWN).unwrap() {
             let (numerator, denominator) = subgroup.to_ratio(&candidate).unwrap();
             println!(
-                "    {:>7}  {:7} norm {:3}  {:+6.1}c",
+                "    {:>7}  norm {:3}  {:+6.1}c",
                 format!("{numerator}/{denominator}"),
-                notation.note(&notation.spell(&candidate).unwrap()),
                 sopfr(&candidate, subgroup.basis()),
                 subgroup.to_cents(&candidate) - tempered,
             );

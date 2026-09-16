@@ -78,6 +78,9 @@ pub struct Notation {
     /// A reduced basis of the written notes worth nothing - the enharmonics -
     /// in notation coordinates.
     enharmonics: Matrix<i64>,
+    /// The quadratic form standing in for [`apotomes`], built once because both
+    /// the reduction and every search take it.
+    weights: Matrix<f64>,
     temperament: Temperament,
 }
 
@@ -196,11 +199,16 @@ impl Notation {
         // long basis reaches nothing legible: unreduced, 41et's enharmonics are
         // "the octave is 41 ups" and "the fifth is 24 ups", and a box around
         // those finds `vvvvvvvD` at seven marks while missing `vB#` at one.
+        //
+        // Reduced against the same form the searches measure with, or the basis
+        // is short in the wrong sense and the box is walked in the wrong shape.
+        let weights = weights(generators.len());
         let enharmonics = kernel_left(&images)?;
+        // `lll` reads the first row before it checks for none, so a notation
+        // that spells bijectively has to skip it.
         let enharmonics = if enharmonics.is_empty() {
             enharmonics
         } else {
-            let weights = unit_weights(enharmonics[0].len());
             lll(&enharmonics, 0.99, &weights).unwrap_or(enharmonics)
         };
 
@@ -208,6 +216,7 @@ impl Notation {
             generators,
             images,
             enharmonics,
+            weights,
             temperament: temperament.clone(),
         })
     }
@@ -327,7 +336,9 @@ impl Notation {
     /// entry per notation coordinate.
     pub fn respell(&self, coordinates: &[i64], count: usize) -> Result<Vec<Vec<i64>>, Error> {
         self.check(coordinates)?;
-        let mut found = vec![coordinates.to_vec()];
+        if self.enharmonics.is_empty() {
+            return Ok(vec![coordinates.to_vec()]);
+        }
 
         // The box is only worth walking around a spelling that is already close
         // to the cheapest one, so pull the given one in first. `solve_diophantine`
@@ -335,25 +346,36 @@ impl Notation {
         // that can be fifteen marks out.
         let mut centre = coordinates.to_vec();
         centre[1] -= NOMINAL_CENTRE;
-        let seed = match cvp_exact(&centre, &self.enharmonics, &self.weights()) {
+        let seed: Vec<i64> = match cvp_exact(&centre, &self.enharmonics, &self.weights) {
             Ok(near) => coordinates.iter().zip(near).map(|(a, b)| a - b).collect(),
             Err(_) => coordinates.to_vec(),
         };
 
+        // Asked for one - which is what `spell` asks for, and what a caller
+        // asks for by far the most often - there is nothing to sort: keep the
+        // cheapest seen and allocate only when it improves.
+        let one = count <= 1;
+        let mut best = seed.clone();
+        let mut found = Vec::new();
+        let mut candidate = vec![0; self.rank()];
         let mut steps = vec![-RESPELL_WIDTH; self.enharmonics.len()];
-        while !self.enharmonics.is_empty() {
-            found.push(
-                (0..self.rank())
-                    .map(|slot| {
-                        seed[slot]
-                            + steps
-                                .iter()
-                                .zip(&self.enharmonics)
-                                .map(|(&step, row)| step * row[slot])
-                                .sum::<i64>()
-                    })
-                    .collect(),
-            );
+        loop {
+            for slot in 0..self.rank() {
+                candidate[slot] = seed[slot]
+                    + steps
+                        .iter()
+                        .zip(&self.enharmonics)
+                        .map(|(&step, row)| step * row[slot])
+                        .sum::<i64>();
+            }
+            if one {
+                if (apotomes(&candidate), &candidate) < (apotomes(&best), &best) {
+                    best.copy_from_slice(&candidate);
+                }
+            } else {
+                found.push(candidate.clone());
+            }
+
             let mut place = 0;
             while place < steps.len() && steps[place] == RESPELL_WIDTH {
                 steps[place] = -RESPELL_WIDTH;
@@ -364,9 +386,15 @@ impl Notation {
             }
             steps[place] += 1;
         }
-        found.sort_unstable_by_key(|c| (apotomes(c), c.clone()));
+
+        if one {
+            return Ok(vec![best]);
+        }
+        // Compared rather than keyed, so that ranking a candidate does not clone
+        // its coordinates to break the tie with.
+        found.sort_unstable_by(|a, b| apotomes(a).cmp(&apotomes(b)).then_with(|| a.cmp(b)));
         found.dedup();
-        found.truncate(count.max(1));
+        found.truncate(count);
         Ok(found)
     }
 
@@ -414,29 +442,6 @@ impl Notation {
     pub fn to_just(&self, coordinates: &[i64]) -> Result<Vec<i64>, Error> {
         self.check(coordinates)?;
         Ok(combination(coordinates, &self.generators, self.dim()))
-    }
-
-    /// A quadratic stand-in for [`apotomes`], for the lattice algorithms, which
-    /// want a form rather than a count: seven for a mark and one for a fifth,
-    /// squared. The octave has to carry a weight of its own or the form is
-    /// degenerate, and one does no harm - it is fixed by the rest anyway once
-    /// the pitch is.
-    fn weights(&self) -> Matrix<f64> {
-        (0..self.rank())
-            .map(|row| {
-                (0..self.rank())
-                    .map(|col| {
-                        if row != col {
-                            0.0
-                        } else if row < 2 {
-                            4.0
-                        } else {
-                            49.0
-                        }
-                    })
-                    .collect()
-            })
-            .collect()
     }
 
     /// Checks that `coordinates` has one entry per notation coordinate.
@@ -629,13 +634,22 @@ pub(crate) fn spans(images: &Matrix<i64>, rank: usize) -> bool {
     solve_diophantine(&transpose(images), &identity).is_ok()
 }
 
-/// An identity weight matrix. Notation coordinates count symbols rather than
-/// primes, so there is nothing to weight them by.
-fn unit_weights(size: usize) -> Matrix<f64> {
-    (0..size)
+/// A quadratic stand-in for [`apotomes`], for the lattice algorithms, which want
+/// a form rather than a count.
+///
+/// The costs are two for a fifth and seven for a mark, so the form carries their
+/// squares. The octave is not free here although `apotomes` ignores it: a zero
+/// on the diagonal makes the form degenerate, and weighting it like a fifth does
+/// no harm, since the pitch fixes it once the rest is chosen.
+fn weights(rank: usize) -> Matrix<f64> {
+    (0..rank)
         .map(|row| {
-            (0..size)
-                .map(|col| f64::from(u8::from(row == col)))
+            (0..rank)
+                .map(|col| match (row == col, row < 2) {
+                    (false, _) => 0.0,
+                    (true, true) => 4.0,
+                    (true, false) => 49.0,
+                })
                 .collect()
         })
         .collect()

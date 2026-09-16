@@ -493,8 +493,21 @@ This is meant for a DAW's UI thread, not its audio thread, so constructing a
 `cargo run --release --example bench` times what does run repeatedly:
 `to_notation`, `to_just`, `simplify` and `candidates`.
 
-`to_notation` and `to_just` are 35-40 nanoseconds regardless of subgroup - one
-allocation, one pass over a handful of coordinates. Not worth a second thought.
+`to_just` is 35-40 nanoseconds regardless of subgroup - one allocation, one pass
+over a handful of coordinates. Not worth a second thought.
+
+**`spell` is no longer free.** It used to be a matrix multiply at the same 38
+nanoseconds; it is now a diophantine solve, a closest vector, and a box walked
+under `apotomes`, which is **2.5 microseconds**. Sixty times slower and still
+cheap enough to spell every visible note on a redraw - a hundred notes is a
+quarter of a millisecond - but it is no longer in the same class as `to_just`
+and should not be called in a loop that does not need it.
+
+It was 48 microseconds before the obvious fix, which is the same one
+`Simplifier::search` needed: ranking a candidate was cloning its coordinates to
+break the tie with. Asked for one answer, which is what `spell` asks for,
+`respell` now keeps a running best and allocates only when it improves; asked
+for several it sorts by comparison rather than by a cloned key.
 
 `simplify` and `candidates` are the real cost, since `Simplifier::search` walks
 a ball of `width.pow(lattice rank)` points, each a candidate interval - 625 of
@@ -537,9 +550,13 @@ where the exponential lives.
   reduction and the seed are load-bearing and both were found the hard way:
   unreduced, 41et's enharmonics are "the octave is 41 ups" and "the fifth is 24
   ups" and a box around them misses everything legible; unseeded, a notation
-  with two accidentals hands back a spelling fifteen marks out. The quadratic
-  weights `cvp_exact` takes are a stand-in for `apotomes`, which is a count and
-  not a form.
+  with two accidentals hands back a spelling fifteen marks out.
+  **The reduction and the search take the same weights**, built once in
+  `weights`: reducing against a different form from the one the search measures
+  with leaves the basis short in the wrong sense. `apotomes` is a count and the
+  lattice algorithms want a form, so the weights carry its squares, four for a
+  fifth and forty nine for a mark. Every answer over the sweep is the same
+  either way, but only one of the two is the right thing to ask for.
 - **The ranking is blind to which accidental it uses**, and that shows. 41et's
   rank 4 notation writes `7/4` as `tA5`, using the mark that belongs to 11,
   because one mark on `A` is cheaper than one on `Bb` - `A` is nearer the middle
