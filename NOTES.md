@@ -322,13 +322,11 @@ an apotome by construction - `MAX_ACCIDENTAL_CENTS`, the rule the whole
 derivation of an accidental hangs on - so two marks are an apotome, which is a
 sharp. In half-apotomes: **seven for a mark, two for a fifth**.
 
-The fifths are counted as how far the note sits *beyond the seven naturals*
-rather than as a distance from `C`. `F C G D A E B` are the fifth coordinates
-`-1` to `5`, and all seven cost nothing; a fifth past either end costs two.
-Measuring from `C` instead makes the flat side cheaper throughout, which is
-enough to spell 5et's third `F` and 7et's `Eb`. Ties are settled by distance
-from `D`, the middle of the naturals, and then by the coordinates, so the order
-never depends on how the search was walked.
+The fifths are counted from `D`, the middle of the seven naturals `F C G D A E
+B`, rather than from `C`. Measuring from `C` makes the flat side cheaper than
+the sharp side by one fifth throughout, which is enough to spell 5et's third `F`
+and 7et's `Eb`. Ties fall back to the coordinates, so the order never depends on
+how the search was walked.
 
 That is `apotomes` in `notation.rs`, and it is the whole of the ranking. It
 gives 12et `C Db D Eb E F F# G Ab A Bb B` with the sharps as the alternates,
@@ -341,8 +339,11 @@ test suite, which is the only thing that separated them:
 | measure | what it costs a fifth | result |
 | --- | --- | --- |
 | `7 * marks + \|f\|` | one, from `C` | 22et writes `D#`, never using the comma it keeps |
-| `7 * marks + 2 * \|f - 2\|` | two, from `D` | flattone writes `F#`, 7et `Eb` |
-| `7 * marks + 2 * beyond` | two, past the naturals | what is in the code |
+| `7 * marks + 2 * beyond` | two, past the seven naturals | agrees with the below but for 11et and 13et, where it stops using an accidental the notation keeps |
+| `7 * marks + 2 * \|f - 2\|` | two, from `D` | what is in the code |
+
+The last two agree on the whole temperament list and differ on 12 of some 900
+notations, all of them 11et and 13et.
 
 ### The gap this leaves
 
@@ -524,6 +525,13 @@ where the exponential lives.
 
 ## Loose ends and known limits
 
+- **`spell` returns the cheapest spelling in its coset**, which `verify` checks
+  over the whole sweep by walking the coset wider than `respell` does and
+  writing the cost out a second time, so that it checks the answer rather than
+  restating how it was found. That is what the old `sweep` example was groping
+  at with a bound on marks and sharps; the bound was never meaningful, since a
+  notation that keeps no accidental has to spell everything with sharps, and
+  `sweep` is gone.
 - **`respell` walks a box, like everything else here.** `RESPELL_WIDTH` either
   way around a `cvp_exact` seed on the `lll` reduced enharmonics. Both the
   reduction and the seed are load-bearing and both were found the hard way:
@@ -534,17 +542,23 @@ where the exponential lives.
   not a form.
 - **The ranking is blind to which accidental it uses**, and that shows. 41et's
   rank 4 notation writes `7/4` as `tA5`, using the mark that belongs to 11,
-  because one mark on `A` is cheaper than one mark on `Bb` - `A` is inside the
-  naturals and `Bb` is a fifth outside. Flattone's larger notation keeps an
-  accidental for 11 and then writes `11/8` as `F#` anyway. Both follow from
-  spelling being a function of the pitch alone, which is what was wanted, and
-  both are cases where the cheapest symbol carries the wrong harmonic hint. A
-  tie-break preferring the accidental of the prime being written is not
-  available, since `spell` is handed a pitch and not a prime; a cost that reads
-  the accidentals in order of their primes would be.
-- **Huygens now wants the second of its three notations**, not the third, its
-  rank 3 already spelling every prime on its own nominal. That is
-  `keeps_nominals` asking `spell` rather than asking a comma.
+  because one mark on `A` is cheaper than one on `Bb` - `A` is nearer the middle
+  of the naturals. Flattone's larger notation keeps an accidental for 11 and
+  writes `11/8` as `F#` anyway. Both follow from spelling being a function of
+  the pitch alone, which is what was wanted; flattone's is right, since `F#` and
+  `tF` are the same note and `F#` is the simpler of the two. Where the cheapest
+  symbol carries the wrong harmonic hint this is taste, and there is no rule
+  underneath it: `spell` is handed a pitch, not a prime, so it cannot prefer the
+  accidental that belongs to what is being written.
+- **Huygens wants the second of its three notations**, not the third, its rank 3
+  already spelling every prime on its own nominal.
+- **Making `keeps_nominals` follow the accidental is vacuous**, though it looks
+  like the fix. Asking for the prime on the letter the chain gives *plus*
+  wherever this notation writes the accidental itself is a condition `spell`
+  satisfies almost automatically, since it spells the prime and the accidental
+  consistently - 41et then recommends its bottom notation, `Fb` and `Cbb` and
+  `Abbb`. Asking for the plain just nominal is what works, and works again once
+  the fifths are counted from `D`.
 - ~~Nothing offers the other spellings of a pitch.~~ Fixed: `Notation::respell`.
 
 - **The simplifier is a local search, not a proof.** `Simplifier` reduces the

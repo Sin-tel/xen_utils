@@ -111,8 +111,11 @@ fn check(name: &str, t: &Temperament) -> usize {
             }
         }
 
-        // Every prime can be written, and reading the spelling back gives the
-        // pitch it was asked for.
+        // Every prime can be written; reading the spelling back gives the pitch
+        // it was asked for; and nothing in the coset is cheaper to write. The
+        // cost is written out again here, and the coset walked wider than
+        // `respell` walks it, so that this checks the answer rather than
+        // restating how it was found.
         for prime in 0..n.dim() {
             let mut interval = vec![0i64; n.dim()];
             interval[prime] = 1;
@@ -120,6 +123,13 @@ fn check(name: &str, t: &Temperament) -> usize {
             if n.pitch(&spelling).unwrap() != t.map(&interval).unwrap() {
                 fail(format!(
                     "option {index}: prime {prime} is spelled as another pitch"
+                ));
+            }
+            if let Some(better) = cheaper(n, &spelling) {
+                fail(format!(
+                    "option {index}: prime {prime} is written {} where {} is cheaper",
+                    n.note(&spelling),
+                    n.note(&better)
                 ));
             }
         }
@@ -145,6 +155,48 @@ fn check(name: &str, t: &Temperament) -> usize {
     }
 
     failures
+}
+
+/// How far either way to walk each enharmonic, wider than `respell` does.
+const WIDTH: i64 = 8;
+
+/// A spelling of the same pitch that costs less than `spelling`, if there is one
+/// within [`WIDTH`] enharmonics of it.
+///
+/// Seven half-apotomes for an accidental mark and two for a fifth away from `D`,
+/// which is `Notation::respell`'s ranking spelled out a second time.
+fn cheaper(n: &Notation, spelling: &[i64]) -> Option<Vec<i64>> {
+    let cost = |c: &[i64]| -> i64 {
+        let marks: i64 = c[2..].iter().map(|e| e.abs()).sum();
+        7 * marks + 2 * (c[1] - 2).abs()
+    };
+    let lattice = n.enharmonics();
+    let mut steps = vec![-WIDTH; lattice.len()];
+    while !lattice.is_empty() {
+        let candidate: Vec<i64> = (0..n.rank())
+            .map(|slot| {
+                spelling[slot]
+                    + steps
+                        .iter()
+                        .zip(lattice)
+                        .map(|(&step, row)| step * row[slot])
+                        .sum::<i64>()
+            })
+            .collect();
+        if cost(&candidate) < cost(spelling) {
+            return Some(candidate);
+        }
+        let mut place = 0;
+        while place < steps.len() && steps[place] == WIDTH {
+            steps[place] = -WIDTH;
+            place += 1;
+        }
+        if place == steps.len() {
+            break;
+        }
+        steps[place] += 1;
+    }
+    None
 }
 
 /// Whether the rows of `basis` span the same lattice as the rows of `other`.

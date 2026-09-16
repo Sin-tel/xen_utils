@@ -372,10 +372,12 @@ impl Notation {
 
     /// Whether every prime is written on the nominal just intonation gives it.
     ///
-    /// A notation that drops an accidental has to write the prime it belonged to
-    /// some other way, and that may move it onto another letter. 41et's smallest
-    /// notation putting `5/4` on `F` is what that looks like, against the `vE5`
-    /// of the notation above it.
+    /// Just intonation spells a prime as a stretch of the fifth chain with one
+    /// mark of that prime's accidental on top, and the letter that stretch lands
+    /// on is what this asks for. A notation that drops the accidental has to
+    /// write the prime some other way, and that may move it onto another letter:
+    /// 41et's smallest notation puts `5/4` on `F` where the notation above it
+    /// has `vE5`.
     ///
     /// Sharps and flats do not count, since seven fifths leave the letter alone:
     /// flattone writes `11/8` as `F#5` where just intonation has `^F5`, and that
@@ -384,12 +386,14 @@ impl Notation {
     /// # Errors
     /// Returns [`Error::Unsupported`] if some prime has no accidental.
     pub fn keeps_nominals(&self) -> Result<bool, Error> {
+        let nominals = NOMINALS.len() as i64;
         for index in 2..self.dim() {
+            let accidental = accidental(self.subgroup(), index)?;
             let mut prime = vec![0i64; self.dim()];
             prime[index] = 1;
-            let fifths = self.spell(&prime)?[1];
-            let just = just_nominal(&accidental(self.subgroup(), index)?, index);
-            if fifths.rem_euclid(NOMINALS.len() as i64) != just {
+
+            let wanted = just_nominal(&accidental, index);
+            if self.spell(&prime)?[1].rem_euclid(nominals) != wanted {
                 return Ok(false);
             }
         }
@@ -589,9 +593,7 @@ fn accidental_symbol(subgroup: &Subgroup, generator: &[i64], total: usize) -> (c
 /// The middle of the seven naturals, as a fifth coordinate.
 ///
 /// `F C G D A E B` are the fifth coordinates `-1` to `5`, so `D` at `2` is the
-/// middle of them. Measuring from `C` instead makes the flat side cheaper than
-/// the sharp side by one fifth throughout, which is enough to spell 5et's third
-/// `F` and 7et's `Eb`.
+/// middle of them.
 const NOMINAL_CENTRE: i64 = 2;
 
 /// How far either way [`Notation::respell`] walks each enharmonic.
@@ -600,29 +602,24 @@ const NOMINAL_CENTRE: i64 = 2;
 /// has to be wide enough that nothing better lies outside it.
 const RESPELL_WIDTH: i64 = 5;
 
-/// What a written note costs to read, and how far it sits from the middle of the
-/// naturals, which settles ties.
+/// What a written note costs to read, in half-apotomes.
 ///
 /// **A sharp is worth two accidental marks.** Seven fifths are an apotome, so
 /// the chain and the marks are commensurable with nothing tuned; and an
 /// accidental is at most *half* an apotome by construction - that is
 /// [`MAX_ACCIDENTAL_CENTS`], the rule the whole derivation of an accidental
-/// hangs on - so two marks are an apotome, which is a sharp. In half-apotomes
-/// that is seven for a mark and fourteen for a sharp.
+/// hangs on - so two marks are an apotome. In half-apotomes that is seven for a
+/// mark and two for a fifth.
 ///
-/// Sharps are counted as the glyphs they are rather than as a distance along
-/// the chain: `F#` is one fifth past `B` and a whole sharp to write. What the
-/// distance does settle is a tie between two spellings that cost the same, and
-/// there it is measured from [`NOMINAL_CENTRE`], since what is free to write is
-/// the seven naturals rather than the note the chain is centred on. The octave
-/// does not appear at all: register costs nothing, and the pitch fixes it once
-/// the rest is chosen.
-fn apotomes(coordinates: &[i64]) -> (i64, i64) {
+/// The fifths are counted from [`NOMINAL_CENTRE`] rather than from `C`, since
+/// the seven naturals are what is free to write and `C` is only where the chain
+/// happens to be centred. Measuring from `C` makes the flat side cheaper than
+/// the sharp side by one fifth throughout, which is enough to spell 5et's third
+/// `F` and 7et's `Eb`. The octave does not appear at all: register costs
+/// nothing, and the pitch fixes it once the rest is chosen.
+fn apotomes(coordinates: &[i64]) -> i64 {
     let marks: i64 = coordinates[2..].iter().map(|c| c.abs()).sum();
-    let fifths = coordinates[1];
-    let last = NOMINALS.len() as i64 - 2;
-    let beyond = (fifths - last).max(0) + (-1 - fifths).max(0);
-    (7 * marks + 2 * beyond, (fifths - NOMINAL_CENTRE).abs())
+    7 * marks + 2 * (coordinates[1] - NOMINAL_CENTRE).abs()
 }
 
 /// Whether generators with these `images` reach every pitch of a rank `rank`
