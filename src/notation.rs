@@ -1078,6 +1078,26 @@ mod tests {
     }
 
     #[test]
+    fn spelling_the_spelled_settles() {
+        // The best spelling of a pitch is already `spell`'s fixed point:
+        // reading it back as a just interval and spelling again should not
+        // move it - the same property `Simplifier::simplify` settles into on
+        // its own answer.
+        for (divisions, subgroup) in [(41, "2.3.5.7.11"), (31, "2.3.5.7"), (22, "2.3.5")] {
+            let notation = et_options(divisions, subgroup).pop().unwrap();
+            for ups in -20..=60 {
+                let mut spelling = vec![0; notation.rank()];
+                spelling[2] = ups;
+                let interval = notation.to_just(&spelling).unwrap();
+
+                let spelled = notation.spell(&interval).unwrap();
+                let round_trip = notation.spell(&notation.to_just(&spelled).unwrap()).unwrap();
+                assert_eq!(round_trip, spelled, "{divisions}et over {subgroup}, {ups} ups");
+            }
+        }
+    }
+
+    #[test]
     fn the_recommendation_is_the_smallest_that_keeps_the_nominals() {
         // 41et has three notations. The smallest spells every prime off its
         // nominal, and the largest only turns the two marks of the middle one

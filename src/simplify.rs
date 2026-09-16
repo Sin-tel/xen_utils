@@ -385,6 +385,24 @@ mod tests {
     }
 
     #[test]
+    fn simplifying_the_simplified_settles() {
+        // The top candidate of a coset is already `simplify`'s fixed point:
+        // asking again should return exactly what was asked.
+        for (divisions, subgroup) in [(41, "2.3.5.7.11"), (31, "2.3.5.7"), (22, "2.3.5")] {
+            let (notation, simplifier) = simplifier(divisions, subgroup);
+            for ups in -20..=60 {
+                let stacked = stack(&notation, ups);
+                let simplified = simplifier.simplify(&stacked).unwrap();
+                assert_eq!(
+                    simplifier.simplify(&simplified).unwrap(),
+                    simplified,
+                    "{divisions}et over {subgroup}, {ups} ups"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn every_notation_of_a_temperament_simplifies_alike() {
         // The comma lattice is the temperament's, so the notation only decides
         // how the answer is spelled.
