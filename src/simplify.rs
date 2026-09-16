@@ -5,11 +5,9 @@ use diophantine::{Matrix, cvp_exact, lll};
 use crate::Error;
 use crate::notation::Notation;
 use crate::primes::{Subgroup, Weighting};
-use crate::util::subtract;
+use crate::util::{LLL_DELTA, subtract};
 
 /// How far to reduce the lattice before searching it.
-const LLL_DELTA: f64 = 0.99;
-
 /// How far around the best so far to look, in each direction along each reduced
 /// basis vector. The search steps by this much until nothing nearer is better,
 /// so the radius bounds one step rather than the whole walk.
@@ -61,11 +59,7 @@ impl Simplifier {
         let weights = subgroup.weights(Weighting::Wilson);
 
         let commas = notation.temperament().comma_basis()?;
-        let lattice = if commas.is_empty() {
-            commas
-        } else {
-            lll(&commas, LLL_DELTA, &weights)?
-        };
+        let lattice = lll(&commas, LLL_DELTA, &weights)?;
 
         Ok(Simplifier {
             subgroup,

@@ -11,7 +11,7 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 [[package]]
 name = "diophantine"
 version = "0.1.0"
-source = "git+https://github.com/Sin-tel/diophantine?rev=8274308#827430852e246254a8fe4ff8ae38677cb80d24ee"
+source = "git+https://github.com/Sin-tel/diophantine?rev=a4a7cbe#a4a7cbea544dc7d698e3ebd6f2c94b1609be3bb4"
 dependencies = [
  "num-traits",
 ]

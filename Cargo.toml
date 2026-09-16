@@ -4,4 +4,4 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-diophantine = { git = "https://github.com/Sin-tel/diophantine", rev = "8274308" }
+diophantine = { git = "https://github.com/Sin-tel/diophantine", rev = "a4a7cbe" }

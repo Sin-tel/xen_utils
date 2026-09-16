@@ -6,7 +6,7 @@ use crate::Error;
 use crate::primes::Subgroup;
 use crate::search::Search;
 use crate::temperament::Temperament;
-use crate::util::{column, combination, first_column};
+use crate::util::{LLL_DELTA, column, combination, first_column};
 
 /// The nominals, in order of the fifth chain. `F` is one fifth below `C`, so
 /// the fifth coordinate `f` picks out `NOMINALS[(f + 1) mod 7]`.
@@ -204,13 +204,7 @@ impl Notation {
         // is short in the wrong sense and the box is walked in the wrong shape.
         let weights = weights(generators.len());
         let enharmonics = kernel_left(&images)?;
-        // `lll` reads the first row before it checks for none, so a notation
-        // that spells bijectively has to skip it.
-        let enharmonics = if enharmonics.is_empty() {
-            enharmonics
-        } else {
-            lll(&enharmonics, 0.99, &weights).unwrap_or(enharmonics)
-        };
+        let enharmonics = lll(&enharmonics, LLL_DELTA, &weights).unwrap_or(enharmonics);
 
         Ok(Notation {
             generators,

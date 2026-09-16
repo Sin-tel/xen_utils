@@ -6,6 +6,9 @@
 
 use diophantine::Matrix;
 
+/// The Lovasz condition for every lattice reduction here, the usual `0.99`.
+pub const LLL_DELTA: f64 = 0.99;
+
 /// The combination of `generators` given by `counts`, as a vector of `dim`
 /// entries.
 pub fn combination(counts: &[i64], generators: &Matrix<i64>, dim: usize) -> Vec<i64> {

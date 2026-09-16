@@ -288,8 +288,10 @@ it can be far out: a two-accidental notation once produced a spelling fifteen
 marks from the best one, and orwell's replacement for `64/63` sat six relations
 away from `225/224`.
 
-`lll` reads `basis[0]` before it checks for an empty basis, so a notation that
-spells bijectively has to skip the call.
+`lll` and `nearest_plane` used to read `basis[0]` before checking for an empty
+basis, so both `Notation::build` and `Simplifier::new` guarded the call. Fixed
+upstream in `diophantine` `a4a7cbe`; the guards are gone and `LLL_DELTA` is
+shared from `util` rather than declared twice.
 
 ## What the derivation used to do, and why it stopped
 
