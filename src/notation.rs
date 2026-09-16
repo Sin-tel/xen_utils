@@ -41,6 +41,15 @@ const PRIME_SYMBOLS: [(u32, char, char); 6] = [
 /// The value is `600 * (7 * log2(3) - 11)`.
 const MAX_ACCIDENTAL_CENTS: f64 = 56.842_503_028_855_52;
 
+/// An accidental, raising or lowering a note by a small interval.
+#[derive(Debug, Clone)]
+pub struct Accidental {
+    /// The interval vector of the accidental.
+    pub vector: Vec<i64>,
+    /// The raising and lowering symbols.
+    pub symbols: (char, char),
+}
+
 /// A notation system: a set of symbols, and what each one maps to in the temperament.
 ///
 /// Notation coordinates are counts of notational generators. The first two are
@@ -61,6 +70,8 @@ const MAX_ACCIDENTAL_CENTS: f64 = 56.842_503_028_855_52;
 pub struct Notation {
     /// The octave, the fifth, then the accidentals, as prime interval vectors.
     generators: Matrix<i64>,
+    /// The accidental symbols.
+    accidentals: Vec<(char, char)>,
     /// What each generator maps to in the temperament, one per row.
     /// This is the map from notation coordinates to pitches.
     images: Matrix<i64>,
@@ -82,9 +93,7 @@ impl Notation {
     /// Returns [`Error::Unsupported`] if the subgroup has more primes beyond 3
     /// than there are accidental symbols, or if some prime has no accidental.
     pub fn from_ji(subgroup: &Subgroup) -> Result<Self, Error> {
-        let accidentals = (2..subgroup.dim())
-            .map(|index| accidental(subgroup, index))
-            .collect::<Result<Matrix<i64>, Error>>()?;
+        let accidentals = derive_accidentals(subgroup)?;
         Notation::from_accidentals(&Temperament::just(subgroup)?, &accidentals)
     }
 
@@ -97,15 +106,20 @@ impl Notation {
     /// than there are symbols, if some prime has no accidental, or if no
     /// notation can be derived at all.
     pub fn from_temperament(temperament: &Temperament) -> Result<Self, Error> {
-        let options = Notation::options(temperament)?;
+        Self::from_temperament_with(temperament, &derive_accidentals(temperament.subgroup())?)
+    }
+
+    /// Builds the recommended notation of `temperament` given a set of `accidentals`.
+    pub fn from_temperament_with(
+        temperament: &Temperament,
+        accidentals: &[Accidental],
+    ) -> Result<Self, Error> {
+        let options = Notation::options_with(temperament, accidentals)?;
         for option in &options {
             if option.keeps_nominals()? {
                 return Ok(option.clone());
             }
         }
-        // A temperament that has to walk the fifth chain to reach a prime can
-        // end up with no notation keeping its nominals.
-        // Those only have a single notation, so there is nothing to choose.
         Ok(options
             .first()
             .expect("there is always at least one option")
@@ -132,7 +146,15 @@ impl Notation {
     /// not reach every note and which has no accidental worth a single step of
     /// it has none.
     pub fn options(temperament: &Temperament) -> Result<Vec<Self>, Error> {
-        Search::new(temperament)?.run()
+        Self::options_with(temperament, &derive_accidentals(temperament.subgroup())?)
+    }
+
+    /// Every notation `temperament` offers with the given `accidentals`, smallest first.
+    pub fn options_with(
+        temperament: &Temperament,
+        accidentals: &[Accidental],
+    ) -> Result<Vec<Self>, Error> {
+        Search::new(temperament, accidentals)?.run()
     }
 
     /// Builds the notation of `temperament` with `accidentals` as its extra
@@ -148,41 +170,14 @@ impl Notation {
     /// of the temperament's subgroup, and [`Error::Unsupported`] if it cannot
     /// be named, if an accidental beyond the first has no symbol, or if the
     /// generators do not reach every pitch of the temperament.
-    pub fn from_accidentals(
+    pub(crate) fn from_accidentals(
         temperament: &Temperament,
-        accidentals: &[Vec<i64>],
+        accidentals: &[Accidental],
     ) -> Result<Self, Error> {
         let subgroup = temperament.subgroup();
-        for (index, accidental) in accidentals.iter().enumerate() {
-            if accidental.len() != subgroup.dim() {
-                return Err(Error::InvalidDimensions(format!(
-                    "accidental {index} has {} entries, expected {} for {subgroup}",
-                    accidental.len(),
-                    subgroup.dim()
-                )));
-            }
-            if accidental[2..].iter().all(|&exponent| exponent == 0) {
-                return Err(Error::Unsupported(format!(
-                    "accidental {index} of {subgroup} has no prime beyond 2 and 3 to name"
-                )));
-            }
-        }
-        // A single accidental never needs a name of its own - see
-        // `accidental_symbol` - so only two or more accidentals require every
-        // one of them to have a prime in `PRIME_SYMBOLS`.
-        if accidentals.len() > 1 {
-            for a in accidentals {
-                let prime = accidental_prime(subgroup, a);
-                if !PRIME_SYMBOLS.iter().any(|&(p, ..)| p == prime) {
-                    return Err(Error::Unsupported(format!(
-                        "notation over {subgroup} keeps more than one accidental, and prime {prime} has no symbol"
-                    )));
-                }
-            }
-        }
 
         let mut generators = fifth_chain(subgroup.dim());
-        generators.extend_from_slice(accidentals);
+        generators.extend(accidentals.iter().map(|a| a.vector.clone()));
         let images = temperament.map_all(&generators)?;
         if !spans(&images, temperament.rank()) {
             return Err(Error::Unsupported(format!(
@@ -199,6 +194,7 @@ impl Notation {
 
         Ok(Notation {
             generators,
+            accidentals: accidentals.into_iter().map(|a| a.symbols).collect(),
             images,
             enharmonics,
             weights,
@@ -350,7 +346,7 @@ impl Notation {
     pub fn keeps_nominals(&self) -> Result<bool, Error> {
         let nominals = NOMINALS.len() as i64;
         for index in 2..self.dim() {
-            let accidental = accidental(self.subgroup(), index)?;
+            let accidental = derive_accidental_vector(self.subgroup(), index)?;
             let mut prime = vec![0i64; self.dim()];
             prime[index] = 1;
 
@@ -406,10 +402,8 @@ impl Notation {
         );
         let (octaves, fifths) = (interval[0], interval[1]);
 
-        let accidentals = &self.generators()[2..];
         let mut name = String::new();
-        for (&count, generator) in interval[2..].iter().zip(accidentals) {
-            let (up, down) = accidental_symbol(self.subgroup(), generator, accidentals.len());
+        for (&count, (up, down)) in interval[2..].iter().zip(&self.accidentals) {
             let symbol = if count < 0 { down } else { up };
             name.extend(std::iter::repeat_n(symbol, count.unsigned_abs() as usize));
         }
@@ -451,6 +445,23 @@ fn just_nominal(accidental: &[i64], index: usize) -> i64 {
     (-accidental[index] * accidental[1]).rem_euclid(NOMINALS.len() as i64)
 }
 
+/// Derives the default accidentals for a subgroup.
+pub fn derive_accidentals(subgroup: &Subgroup) -> Result<Vec<Accidental>, Error> {
+    let mut result = Vec::new();
+    for index in 2..subgroup.dim() {
+        let vector = derive_accidental_vector(subgroup, index)?;
+        let prime = subgroup.basis()[index];
+        let symbols = PRIME_SYMBOLS
+            .iter()
+            .find(|&&(p, ..)| p == prime)
+            .map(|&(_, up, down)| (up, down))
+            .ok_or_else(|| Error::Unsupported(format!("prime {} has no symbol", prime)))?;
+
+        result.push(Accidental { vector, symbols });
+    }
+    Ok(result)
+}
+
 /// How far up and down the fifth chain to look for an accidental.
 const MAX_FIFTH_OFFSET: i64 = 12;
 
@@ -466,7 +477,10 @@ const MAX_FIFTH_OFFSET: i64 = 12;
 /// # Errors
 /// Returns [`Error::Unsupported`] if no offset within [`MAX_FIFTH_OFFSET`]
 /// gives a small enough interval.
-pub(crate) fn accidental(subgroup: &Subgroup, index: usize) -> Result<Vec<i64>, Error> {
+pub(crate) fn derive_accidental_vector(
+    subgroup: &Subgroup,
+    index: usize,
+) -> Result<Vec<i64>, Error> {
     let offsets = std::iter::once(0).chain((1..=MAX_FIFTH_OFFSET).flat_map(|k| [k, -k]));
     for offset in offsets {
         let mut interval = vec![0i64; subgroup.dim()];
@@ -484,49 +498,6 @@ pub(crate) fn accidental(subgroup: &Subgroup, index: usize) -> Result<Vec<i64>, 
         "no accidental within {MAX_FIFTH_OFFSET} fifths of {} in {subgroup}",
         subgroup.basis()[index]
     )))
-}
-
-/// The prime `generator` raises or lowers: the one basis element beyond the
-/// octave and the fifth where it is nonzero.
-///
-/// Every accidental has support `{2, 3, p}` by construction, so this is always
-/// exactly one index.
-///
-/// # Panics
-/// Panics if `generator` has no such index, which cannot happen for a
-/// generator [`accidental`] produced.
-fn accidental_prime(subgroup: &Subgroup, generator: &[i64]) -> u32 {
-    let index = generator[2..]
-        .iter()
-        .position(|&e| e != 0)
-        .expect("an accidental has support on its own prime beyond 2 and 3");
-    subgroup.basis()[index + 2]
-}
-
-/// The raising and lowering symbols for one of a notation's accidentals, given
-/// how many accidentals it keeps in total.
-///
-/// A notation with only one accidental is using it as ups and downs does, for
-/// a generic small step, so it gets the generic `^`/`v` - unless it is the
-/// quartertone `33/32`, which already has its own ASCII shorthand, `t`/`d`.
-/// Once a second accidental is in play there is no such generic reading left,
-/// so each one gets its own fixed symbol from [`PRIME_SYMBOLS`], keyed by
-/// prime rather than by position: the same prime then always prints the same
-/// way, whichever other accidentals it shares the notation with.
-///
-/// # Panics
-/// Panics if `total > 1` and `generator`'s prime has no entry in
-/// [`PRIME_SYMBOLS`]; [`Notation::from_accidentals`] checks this ahead of time.
-fn accidental_symbol(subgroup: &Subgroup, generator: &[i64], total: usize) -> (char, char) {
-    let prime = accidental_prime(subgroup, generator);
-    if total == 1 {
-        return if prime == 11 { ('t', 'd') } else { ('^', 'v') };
-    }
-    PRIME_SYMBOLS
-        .iter()
-        .find(|&&(p, ..)| p == prime)
-        .map(|&(_, up, down)| (up, down))
-        .expect("Notation::from_accidentals checks every accidental beyond the first has a symbol")
 }
 
 /// The middle of the seven naturals, as a fifth coordinate.
@@ -772,8 +743,7 @@ mod tests {
         // The just third, seventh and eleventh are each a pythagorean interval
         // bent by one accidental.
         assert_eq!(note_of(&notation("2.3.5"), 5, 4), "vE5");
-        assert_eq!(note_of(&notation("2.3.7"), 7, 4), "vBb5");
-        // 33/32 alone is the quartertone, so it gets t/d rather than ^/v.
+        assert_eq!(note_of(&notation("2.3.7"), 7, 4), "<Bb5");
         assert_eq!(note_of(&notation("2.3.11"), 11, 8), "tF5");
 
         // Over the full subgroup they keep those spellings, and each symbol is
@@ -834,7 +804,7 @@ mod tests {
         let n = tempered("2.3.5.7", &[(81, 80), (225, 224)]);
         assert_eq!(accidental_ratios(&n), vec![(64, 63)]);
         assert_eq!(note_of(&n, 5, 4), "E5");
-        assert_eq!(note_of(&n, 7, 4), "vBb5");
+        assert_eq!(note_of(&n, 7, 4), "<Bb5");
     }
 
     #[test]
@@ -861,7 +831,7 @@ mod tests {
         assert!(accidental_ratios(&options[0]).is_empty());
         assert_eq!(note_of(&options[0], 7, 4), "A#5");
         assert_eq!(note_of(&options[0], 5, 4), "E5");
-        assert_eq!(note_of(&options[1], 7, 4), "vBb5");
+        assert_eq!(note_of(&options[1], 7, 4), "<Bb5");
     }
 
     #[test]
@@ -911,7 +881,7 @@ mod tests {
         assert_eq!(note_of(&options[0], 5, 4), "E5");
         assert_eq!(note_of(&options[0], 7, 4), "A#5");
         assert_eq!(accidental_ratios(&options[1]), vec![(64, 63)]);
-        assert_eq!(note_of(&options[1], 7, 4), "vBb5");
+        assert_eq!(note_of(&options[1], 7, 4), "<Bb5");
     }
 
     #[test]
@@ -965,7 +935,7 @@ mod tests {
         let options = et_options(31, "2.3.5.7.11");
         assert_eq!(ranks(&options), vec![2, 3]);
         assert_eq!(accidental_ratios(&options[1]), vec![(64, 63)]);
-        assert_eq!(note_of(&options[1], 11, 8), "^F5");
+        assert_eq!(note_of(&options[1], 11, 8), ">F5");
     }
 
     #[test]
@@ -1048,7 +1018,7 @@ mod tests {
             assert_eq!(note_of(n, 5, 4), "E5");
         }
         assert_eq!(note_of(&options[0], 7, 4), "A#5");
-        assert_eq!(note_of(&options[1], 7, 4), "vBb5");
+        assert_eq!(note_of(&options[1], 7, 4), "<Bb5");
         // 11 keeps t/d once 7 is kept alongside it too.
         assert_eq!(note_of(&options[2], 11, 8), "tF5");
     }
@@ -1091,8 +1061,13 @@ mod tests {
                 let interval = notation.to_just(&spelling).unwrap();
 
                 let spelled = notation.spell(&interval).unwrap();
-                let round_trip = notation.spell(&notation.to_just(&spelled).unwrap()).unwrap();
-                assert_eq!(round_trip, spelled, "{divisions}et over {subgroup}, {ups} ups");
+                let round_trip = notation
+                    .spell(&notation.to_just(&spelled).unwrap())
+                    .unwrap();
+                assert_eq!(
+                    round_trip, spelled,
+                    "{divisions}et over {subgroup}, {ups} ups"
+                );
             }
         }
     }
@@ -1172,8 +1147,7 @@ mod tests {
     fn a_temperament_accepts_each_requested_11_limit_prefix() {
         let subgroup: Subgroup = "2.3.5.7.11".parse().unwrap();
         let temperament = Temperament::equal(41, &subgroup).unwrap();
-        let accidentals =
-            [(81, 80), (64, 63), (33, 32)].map(|(num, den)| subgroup.factorize(num, den).unwrap());
+        let accidentals = derive_accidentals(&subgroup).unwrap();
 
         let notations: Vec<Notation> = (1..=accidentals.len())
             .map(|count| Notation::from_accidentals(&temperament, &accidentals[..count]).unwrap())
@@ -1197,7 +1171,7 @@ mod tests {
         let temperament = Temperament::equal(25, &subgroup).unwrap();
         assert!(Notation::from_accidentals(&temperament, &[]).is_err());
 
-        let syntonic = subgroup.factorize(81, 80).unwrap();
+        let syntonic = derive_accidentals(&subgroup).unwrap()[0].clone();
         let notation = Notation::from_accidentals(&temperament, &[syntonic]).unwrap();
         assert_eq!(notation.rank(), 3);
         assert_eq!(note_of(&notation, 5, 4), "vE5");
@@ -1233,8 +1207,9 @@ mod tests {
         // its fifth thirteen, which is the whole of ups and downs in 22et.
         let subgroup: Subgroup = "2.3.5.7".parse().unwrap();
         let t = Temperament::equal(22, &subgroup).unwrap();
-        let syntonic = subgroup.factorize(81, 80).unwrap();
         let bare = Notation::from_accidentals(&t, &[]).unwrap();
+
+        let syntonic = derive_accidentals(&subgroup).unwrap()[0].clone();
         let raised = Notation::from_accidentals(&t, &[syntonic]).unwrap();
 
         assert_eq!(bare.enharmonics().len(), 1);
@@ -1248,7 +1223,7 @@ mod tests {
         for (divisions, subgroup) in [(12, "2.3.5"), (22, "2.3.5.7"), (41, "2.3.5.7.11")] {
             let subgroup: Subgroup = subgroup.parse().unwrap();
             let t = Temperament::equal(divisions, &subgroup).unwrap();
-            let accidentals = Notation::from_ji(&subgroup).unwrap().generators()[2..].to_vec();
+            let accidentals = derive_accidentals(&subgroup).unwrap();
             for count in 0..=accidentals.len() {
                 let Ok(n) = Notation::from_accidentals(&t, &accidentals[..count]) else {
                     continue;
@@ -1293,5 +1268,48 @@ mod tests {
 
             assert_eq!((w_l1 * w_l1) as f64, w_l2);
         }
+    }
+
+    #[test]
+    fn custom_accidental_25edo() {
+        let subgroup: Subgroup = "2.3.5".parse().unwrap();
+        let temperament = Temperament::equal(25, &subgroup).unwrap();
+
+        // Fails on defaults because 81/80 does not reach the whole temperament
+        // or is not worth a step (25edo over 2.3.5 is known to have no default notation).
+        assert!(Notation::options(&temperament).is_err());
+
+        // But we can supply 25/24 as a custom accidental.
+        let custom_acc = Accidental {
+            vector: subgroup.factorize(25, 24).unwrap(),
+            symbols: ('^', 'v'),
+        };
+
+        let options = Notation::options_with(&temperament, &[custom_acc]).unwrap();
+        assert_eq!(ranks(&options), vec![3]);
+        assert_eq!(note_of(&options[0], 5, 4), "vvE5");
+    }
+
+    #[test]
+    fn custom_accidental_41edo() {
+        let subgroup: Subgroup = "2.3.5.7".parse().unwrap();
+        let temperament = Temperament::equal(41, &subgroup).unwrap();
+
+        // We can notate using a single accidental for 49/48 or 50/49.
+        let acc_49_48 = Accidental {
+            vector: subgroup.factorize(49, 48).unwrap(),
+            symbols: ('^', 'v'),
+        };
+
+        let acc_50_49 = Accidental {
+            vector: subgroup.factorize(50, 49).unwrap(),
+            symbols: ('^', 'v'),
+        };
+
+        let options_49_48 = Notation::options_with(&temperament, &[acc_49_48.clone()]).unwrap();
+        assert_eq!(options_49_48.last().unwrap().rank(), 3);
+
+        let options_50_49 = Notation::options_with(&temperament, &[acc_50_49.clone()]).unwrap();
+        assert_eq!(options_50_49.last().unwrap().rank(), 3);
     }
 }

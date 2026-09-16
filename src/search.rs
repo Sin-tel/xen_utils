@@ -6,7 +6,7 @@
 use diophantine::Matrix;
 
 use crate::Error;
-use crate::notation::{Notation, accidental, fifth_chain, spans};
+use crate::notation::{Accidental, Notation, fifth_chain, spans};
 use crate::temperament::Temperament;
 use crate::util::{is_zero, select};
 
@@ -22,7 +22,7 @@ pub(crate) struct Search<'a> {
     /// out, in order of the primes. One it does temper out would raise by
     /// nothing, so it is never worth keeping and is dropped here rather than
     /// filtered out later.
-    accidentals: Matrix<i64>,
+    accidentals: Vec<Accidental>,
     /// What each accidental maps to in the temperament.
     images: Matrix<i64>,
 }
@@ -33,18 +33,22 @@ impl<'a> Search<'a> {
     ///
     /// # Errors
     /// Returns [`Error::Unsupported`] if some prime has no accidental.
-    pub(crate) fn new(temperament: &'a Temperament) -> Result<Self, Error> {
-        let subgroup = temperament.subgroup();
-        let derived: Matrix<i64> = (2..subgroup.dim())
-            .map(|index| accidental(subgroup, index))
-            .collect::<Result<_, Error>>()?;
+    pub(crate) fn new(
+        temperament: &'a Temperament,
+        accidentals: &[Accidental],
+    ) -> Result<Self, Error> {
+        let derived: Matrix<i64> = accidentals.iter().map(|a| a.vector.clone()).collect();
         let derived_images = temperament.map_all(&derived)?;
         let useful: Vec<usize> = (0..derived.len())
             .filter(|&index| !is_zero(&derived_images[index]))
             .collect();
+
+        let filtered_accidentals: Vec<Accidental> =
+            useful.iter().map(|&i| accidentals[i].clone()).collect();
+
         Ok(Search {
             temperament,
-            accidentals: select(&derived, &useful),
+            accidentals: filtered_accidentals,
             images: select(&derived_images, &useful),
         })
     }
@@ -76,7 +80,9 @@ impl<'a> Search<'a> {
                     .copied()
                     .collect();
                 keep.sort_unstable();
-                Notation::from_accidentals(self.temperament, &select(&self.accidentals, &keep))
+                let keep_accs: Vec<Accidental> =
+                    keep.iter().map(|&i| self.accidentals[i].clone()).collect();
+                Notation::from_accidentals(self.temperament, &keep_accs)
             })
             .collect()
     }
@@ -116,7 +122,7 @@ impl<'a> Search<'a> {
     /// pitch of the temperament. Where they do not, some pitch has no spelling.
     fn reaches(&self, keep: &[usize]) -> Result<bool, Error> {
         let mut generators = fifth_chain(self.temperament.dim());
-        generators.extend(select(&self.accidentals, keep));
+        generators.extend(keep.iter().map(|&i| self.accidentals[i].vector.clone()));
         let images = self.temperament.map_all(&generators)?;
         Ok(spans(&images, self.temperament.rank()))
     }
