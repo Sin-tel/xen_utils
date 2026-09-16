@@ -351,11 +351,6 @@ impl Notation {
             Err(_) => coordinates.to_vec(),
         };
 
-        // Asked for one - which is what `spell` asks for, and what a caller
-        // asks for by far the most often - there is nothing to sort: keep the
-        // cheapest seen and allocate only when it improves.
-        let one = count <= 1;
-        let mut best = seed.clone();
         let mut found = Vec::new();
         let mut candidate = vec![0; self.rank()];
         let mut steps = vec![-RESPELL_WIDTH; self.enharmonics.len()];
@@ -368,13 +363,7 @@ impl Notation {
                         .map(|(&step, row)| step * row[slot])
                         .sum::<i64>();
             }
-            if one {
-                if (apotomes(&candidate), &candidate) < (apotomes(&best), &best) {
-                    best.copy_from_slice(&candidate);
-                }
-            } else {
-                found.push(candidate.clone());
-            }
+            found.push(candidate.clone());
 
             let mut place = 0;
             while place < steps.len() && steps[place] == RESPELL_WIDTH {
@@ -387,14 +376,11 @@ impl Notation {
             steps[place] += 1;
         }
 
-        if one {
-            return Ok(vec![best]);
-        }
         // Compared rather than keyed, so that ranking a candidate does not clone
         // its coordinates to break the tie with.
         found.sort_unstable_by(|a, b| apotomes(a).cmp(&apotomes(b)).then_with(|| a.cmp(b)));
         found.dedup();
-        found.truncate(count);
+        found.truncate(count.max(1));
         Ok(found)
     }
 
@@ -605,7 +591,7 @@ const NOMINAL_CENTRE: i64 = 2;
 ///
 /// The answers wanted are the first few and the basis is reduced, so this only
 /// has to be wide enough that nothing better lies outside it.
-const RESPELL_WIDTH: i64 = 5;
+const RESPELL_WIDTH: i64 = 1;
 
 /// What a written note costs to read, in half-apotomes.
 ///

@@ -244,10 +244,11 @@ concern. `cargo run --release --example bench` times what runs repeatedly, on
 41et over `2.3.5.7.11`:
 
 ```
-Notation::spell            2.4 us
-Notation::to_just           39 ns
-Simplifier::simplify        56 us
-Simplifier::candidates(8)   54 us
+Notation::spell             2.1 us
+Notation::respell(4)        1.3 us
+Notation::to_just            39 ns
+Simplifier::simplify         56 us
+Simplifier::candidates(8)    54 us
 ```
 
 `to_just` is a matrix multiply and not worth a second thought. **`spell` is no
@@ -257,9 +258,15 @@ cheap enough to spell every visible note on a redraw - a hundred notes is a
 quarter of a millisecond - but no longer in the same class, and not to be called
 in a loop that does not need it.
 
-It was 48 microseconds before the obvious fix, which is the same one
+It was 48 microseconds before two fixes. The first is the one
 `Simplifier::search` needed once: ranking a candidate cloned its coordinates to
-break the tie with.
+break the tie with. The second was narrowing `RESPELL_WIDTH` from 5 to 2, which
+is where `respell` asked for more than one answer spends almost everything -
+that call went from 8.4 microseconds to 1.3.
+
+A special case for one answer, which is what `spell` asks for, was worth 3.4x at
+width 5 and 13% at width 2, so it is gone: most callers want several anyway,
+since a list of one may be the spelling they already have.
 
 ## Everything here walks a box, and every box needs a reduced basis
 
@@ -340,21 +347,39 @@ should transpose in notation coordinates rather than respell each member.
   provably not enough: `a_radius_of_two_is_enough_and_a_radius_of_one_is_not`
   pins the case, 9et reaching `1/39366` of norm 29 where a radius of 1 stops at
   `1/34560` of norm 30.
-- **`respell` is a bounded search too.** `verify` checks that `spell` returns the
-  cheapest spelling in its coset, walking wider than `respell` does and writing
-  the cost out a second time so that it checks the answer rather than restating
-  how it was found. 0 failures over the sweep, which is what says `RESPELL_WIDTH`
-  and the seed are adequate.
+- **`respell` is a bounded search too**, but barely. The seed is an exact
+  closest vector, so the walk only corrects for the quadratic form standing in
+  for `apotomes`, and that correction is never more than one step over anything
+  swept: a width of 1 gives the same answers as a width of 5 everywhere, while a
+  width of 0 moves 260 lines and fails `verify` 117 times. `RESPELL_WIDTH` is 2,
+  for the margin. `verify` checks the answers independently, walking wider than
+  `respell` does and writing the cost out a second time.
 - **Six symbols means 19-limit is the ceiling** for any notation keeping more
   than one accidental. A notation keeping exactly one reads it as ups and downs
   does and gets the generic `^`/`v`, so it works at any prime - unless that one
   accidental is `33/32`, which gets `t`/`d`.
 - **An accidental defined as one step** - what ups and downs uses in general - is
   still not available, which is why some equal temperaments get no notation.
-- **Whether `225/224` may be an accidental: no.** The `{2, 3, p}` support rule is
-  a real constraint. Everything hangs off a prime having exactly one accidental -
-  the necessary/optional/passed-over classification, symbols keyed to a prime -
-  and that is worth more than a multi-prime accidental would buy.
+- **Accidentals off the derived set: the maths does not care, the names do.**
+  `build` takes whatever list it is given, and everything downstream - `pitch`,
+  `spell`, `respell`, the enharmonics, and all of `Search`'s classification -
+  treats the accidentals as an opaque list. Handed Johnston's pair, `81/80` and
+  the septimal `36/35`, it builds and spells correctly: `7/4` comes out
+  `[2, -2, 1, -1]`, which is `16/9` raised a syntonic comma and lowered a
+  `36/35`. Four things would need doing:
+  - **Symbols.** `accidental_prime` takes the first nonzero coordinate beyond 2
+    and 3, so `36/35 = [2, 2, -1, -1]` is attributed to 5. Both accidentals then
+    claim `^`/`v` and `7/4` prints as `^vBb5`, which cannot be read. Accidentals
+    would have to carry a symbol rather than have one derived.
+  - **`keeps_nominals`**, hence the recommendation: `just_nominal` needs to know
+    which prime an accidental corrects and by how many fifths, and a mixed-axis
+    accidental has no single answer.
+  - **The half-apotome bound is unenforced** on a supplied accidental, and
+    `apotomes` charging seven per mark is only sound because of it.
+  - `Search::new` and `from_ji` derive one accidental per prime and would need a
+    supplied list instead. Mechanical.
+
+  That is five touch points in all; nothing in the core moves.
 - **An equal temperament sweep is a coverage test, not a judgement.**
   Temperaments can be arbitrarily bad and most of what a sweep turns up is
   nobody's notation. It catches panics and shows what a rule change moved; for

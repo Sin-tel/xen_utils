@@ -1,5 +1,5 @@
 //! Rough timings of the operations expected to run on a hot path: `simplify`,
-//! `candidates`, `spell` and `to_just`. Building a `Notation` or a
+//! `candidates`, `spell`, `respell` and `to_just`. Building a `Notation` or a
 //! `Simplifier` is not measured, since that happens once and is reused.
 //!
 //! No harness, no statistics - just wall time over enough iterations that
@@ -56,6 +56,12 @@ fn main() {
         time("Notation::spell", 10_000, || {
             i = (i + 1) % intervals.len();
             std::hint::black_box(notation.spell(&intervals[i]).unwrap());
+        });
+
+        let mut i = 0;
+        time("Notation::respell(4)", 10_000, || {
+            i = (i + 1) % coordinates.len();
+            std::hint::black_box(notation.respell(&coordinates[i], 4).unwrap());
         });
 
         let mut i = 0;
