@@ -549,6 +549,58 @@ notation of 41et lose?* - rather than as "what replaces `64/63`".
   which is what the earlier measurement showed: dropping the preference order
   entirely moved 17 of 912 lines.
 
+### The question that is actually wanted
+
+Settled: **given a spelling, what else does the temperament call the same
+note?** The kernel of the notation does not enter it. The spellings of one pitch
+are a coset of `E`, and `E` is `kernel_left` of the generator images - so it
+depends on the generators and the temperament and on nothing else, which is why
+two notations built on the same generators answer identically and why the
+simplifier does not care. `Notation::enharmonics` already computes it that way.
+
+The temperament is the universe and the notation is a legible interface to it.
+Just intonation is a useful fiction about that universe: the approximations
+matter, but `14/11` and `81/64` are one note in 41et, and so are `E`, `vvvF`,
+`^^D#` and `vB#`. Two separate queries, then, and both are wanted:
+
+- **what is this note?** - ranked just intervals, `Simplifier::candidates`,
+  which depends on the temperament alone;
+- **how else can I write it?** - ranked spellings, the coset of `E`, which
+  `cargo run --example respell` prototypes.
+
+Which two of four commas a rank 3 notation of 41et should lose is not a question
+to put to anyone, and it does not have to be asked: it only decides which
+spelling comes back first for a just interval, and that is what the second query
+is for.
+
+### Ranking spellings: count marks and sharps together
+
+Counting symbols is meaningful on this axis, unlike ranking intervals by
+notation coordinates - there is no prime on the fifth axis, but the number of
+symbols on a page is a count and not a claim about pitch. **Which** count still
+matters, and the two obvious ones do not behave alike.
+
+- **Marks before sharps**, with sharps only a tie-break, runs away. 41et's fifth
+  chain reaches every pitch, so far out along it there is always a spelling with
+  no marks and six sharps, and preferring no marks at any price finds it.
+- **Marks and sharps together** does not.
+
+Measured by widening the box and asking how much of the ordering survives, over
+the 41 pitches of 41et:
+
+```
+      marks: the first two agree with a wider box on  7 of 41
+    symbols: the first two agree with a wider box on 41 of 41
+```
+
+This is the same runaway that killed the metric-free comma rules, one axis over,
+and the same cure: do not let one kind of symbol be preferred at any price. The
+lattice has to be `lll` reduced before the box is walked, too, for the reason
+`shortest_stack` and the `trace` example already record - unreduced, 41et's
+enharmonics come back as "the octave is 41 ups" and "the fifth is 24 ups", and a
+box around those reaches `vvvvvvvD` at seven marks while never reaching `vB#` at
+one mark and one sharp.
+
 ### The gap this leaves
 
 Nothing offers the **other spellings of a pitch**. `Notation::enharmonics` gives
