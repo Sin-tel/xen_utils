@@ -1013,6 +1013,17 @@ mod tests {
     }
 
     #[test]
+    fn equal_temperament_gets_single_step_accidental() {
+        // A constructed example that maps 81/80 to two steps and 64/63 to one, and does not have a single circle of fifths.
+        let subgroup: Subgroup = "2.3.5.7".parse().unwrap();
+        let temperament =
+            Temperament::from_mapping(&vec![vec![25, 40, 60, 69]], &subgroup).unwrap();
+        let options = Notation::options(&temperament).unwrap();
+        assert_eq!(ranks(&options), vec![3]);
+        assert_eq!(accidental_ratios(&options[0]), vec![(64, 63)]);
+    }
+
+    #[test]
     fn no_rank_two_notation_when_the_fifth_chain_does_not_reach() {
         // Blackwood's fifth chain closes after five notes, and porcupine
         // reaches 5 only through its own comma. Neither has a rank 2 notation,

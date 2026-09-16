@@ -27,31 +27,6 @@ pub(crate) struct Search<'a> {
     useful: Vec<usize>,
 }
 
-/// How the search sorts the accidentals, which is the whole of the decision
-/// being made: the run follows from this and nothing else.
-struct Plan {
-    /// Kept by every notation in the run.
-    necessary: Vec<usize>,
-    /// Taken on one at a time in this order, each splitting apart pitches the
-    /// notation before it wrote alike.
-    optional: Vec<usize>,
-}
-
-impl Plan {
-    /// The accidentals kept by the notation that has taken on `extras` of the
-    /// optional ones, in order of the primes.
-    fn kept(&self, extras: usize) -> Vec<usize> {
-        let mut kept: Vec<usize> = self
-            .necessary
-            .iter()
-            .chain(&self.optional[..extras])
-            .copied()
-            .collect();
-        kept.sort_unstable();
-        kept
-    }
-}
-
 impl<'a> Search<'a> {
     /// Derives the accidentals of the temperament's subgroup and what each one
     /// is worth to it.
@@ -77,20 +52,6 @@ impl<'a> Search<'a> {
 
     /// Every notation the temperament offers, smallest first.
     pub(crate) fn run(&self) -> Result<Vec<Notation>, Error> {
-        let plan = self.plan()?;
-        (0..=plan.optional.len())
-            .map(|extras| {
-                Notation::from_accidentals(
-                    self.temperament,
-                    &select(&self.accidentals, &plan.kept(extras)),
-                )
-            })
-            .collect()
-    }
-
-    /// Sorts the accidentals into the ones every notation keeps and the ones the
-    /// run takes on one at a time. Everything else no notation keeps.
-    fn plan(&self) -> Result<Plan, Error> {
         let candidates = self.candidates();
         let necessary = self.necessary(&candidates)?;
 
@@ -107,10 +68,18 @@ impl<'a> Search<'a> {
             }
         }
 
-        Ok(Plan {
-            necessary,
-            optional,
-        })
+        (0..=optional.len())
+            .map(|extras| {
+                // The accidentals kept by the notation that has taken on `extras` of the optional ones, in order.
+                let mut keep: Vec<usize> = necessary
+                    .iter()
+                    .chain(&optional[..extras])
+                    .copied()
+                    .collect();
+                keep.sort_unstable();
+                Notation::from_accidentals(self.temperament, &select(&self.accidentals, &keep))
+            })
+            .collect()
     }
 
     /// The accidentals a notation may use, in order.
@@ -134,8 +103,7 @@ impl<'a> Search<'a> {
             .collect()
     }
 
-    /// The smallest subset of `candidates` that makes a notation possible at
-    /// all.
+    /// The smallest subset of `candidates` that makes a notation possible at all.
     fn necessary(&self, candidates: &[usize]) -> Result<Vec<usize>, Error> {
         for size in 0..=candidates.len() {
             // Subsets in lexicographic order, so that the accidentals offered
