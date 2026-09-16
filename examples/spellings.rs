@@ -22,7 +22,7 @@ const SHOWN: usize = 5;
 fn main() {
     for (divisions, subgroup) in [(12, "2.3.5"), (DIVISIONS, SUBGROUP)] {
         let subgroup: Subgroup = subgroup.parse().unwrap();
-        let temperament = Temperament::et(divisions, &subgroup).unwrap();
+        let temperament = Temperament::equal(divisions, &subgroup).unwrap();
         let options = Notation::options(&temperament).unwrap();
         let notation = Notation::from_temperament(&temperament).unwrap();
         let simplifier = Simplifier::new(&options[0]).unwrap();

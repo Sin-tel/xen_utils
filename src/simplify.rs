@@ -4,7 +4,7 @@ use diophantine::{Matrix, cvp_exact, lll};
 
 use crate::Error;
 use crate::notation::Notation;
-use crate::primes::{Subgroup, Weighting};
+use crate::primes::Subgroup;
 use crate::util::{LLL_DELTA, subtract};
 
 /// How far to reduce the lattice before searching it.
@@ -56,7 +56,7 @@ impl Simplifier {
     /// computed or reduced.
     pub fn new(notation: &Notation) -> Result<Self, Error> {
         let subgroup = notation.subgroup().clone();
-        let weights = subgroup.weights(Weighting::Wilson);
+        let weights = subgroup.weights();
 
         let commas = notation.temperament().comma_basis()?;
         let lattice = lll(&commas, LLL_DELTA, &weights)?;
@@ -222,7 +222,7 @@ mod tests {
     /// keep none. Simplifying does not depend on the notation either way.
     fn simplifier(divisions: i64, subgroup: &str) -> (Notation, Simplifier) {
         let subgroup: Subgroup = subgroup.parse().unwrap();
-        let temperament = Temperament::et(divisions, &subgroup).unwrap();
+        let temperament = Temperament::equal(divisions, &subgroup).unwrap();
         let options = Notation::options(&temperament).unwrap();
         let notation = options.last().unwrap().clone();
         let simplifier = Simplifier::new(&notation).unwrap();
@@ -385,7 +385,7 @@ mod tests {
         // The comma lattice is the temperament's, so the notation only decides
         // how the answer is spelled.
         let subgroup: Subgroup = "2.3.5.7.11".parse().unwrap();
-        let temperament = Temperament::et(41, &subgroup).unwrap();
+        let temperament = Temperament::equal(41, &subgroup).unwrap();
         let options = Notation::options(&temperament).unwrap();
         assert_eq!(options.len(), 3);
 

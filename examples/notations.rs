@@ -107,7 +107,7 @@ fn accidentals(notation: &Notation) -> String {
 /// Parses the third field: `et N`, or a list of commas.
 fn parse_temperament(definition: &str, subgroup: &Subgroup) -> Result<Temperament, Box<dyn Error>> {
     if let Some(divisions) = definition.strip_prefix("et ") {
-        return Ok(Temperament::et(divisions.trim().parse()?, subgroup)?);
+        return Ok(Temperament::equal(divisions.trim().parse()?, subgroup)?);
     }
 
     let commas = definition

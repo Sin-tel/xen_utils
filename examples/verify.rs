@@ -45,7 +45,7 @@ fn main() {
         for divisions in 5..=72 {
             // A contorted equal temperament, such as 24et over 2.3.5, is
             // refused rather than silently answered as a different one.
-            let Ok(t) = Temperament::et(divisions, &subgroup) else {
+            let Ok(t) = Temperament::equal(divisions, &subgroup) else {
                 continue;
             };
             failures += check(&format!("{divisions}et over {subgroup}"), &t);
@@ -209,7 +209,7 @@ fn same_lattice(basis: &Matrix<i64>, other: &Matrix<i64>) -> bool {
 fn parse(subgroup: &str, definition: &str) -> Result<Temperament, Box<dyn Error>> {
     let subgroup: Subgroup = subgroup.parse()?;
     if let Some(divisions) = definition.strip_prefix("et ") {
-        return Ok(Temperament::et(divisions.trim().parse()?, &subgroup)?);
+        return Ok(Temperament::equal(divisions.trim().parse()?, &subgroup)?);
     }
     let commas = definition
         .split([',', ' '])

@@ -40,7 +40,7 @@ fn main() {
     for subgroup in SUBGROUPS {
         let subgroup: Subgroup = subgroup.parse().unwrap();
         for divisions in 5..=99 {
-            match Temperament::et(divisions, &subgroup) {
+            match Temperament::equal(divisions, &subgroup) {
                 Ok(t) => show(&format!("{divisions}et"), &t),
                 Err(_) => println!("{divisions}et {subgroup}: contorted"),
             }
@@ -103,7 +103,7 @@ fn ratio(subgroup: &Subgroup, interval: &[i64]) -> String {
 fn parse(subgroup: &str, definition: &str) -> Result<Temperament, Box<dyn Error>> {
     let subgroup: Subgroup = subgroup.parse()?;
     if let Some(divisions) = definition.strip_prefix("et ") {
-        return Ok(Temperament::et(divisions.trim().parse()?, &subgroup)?);
+        return Ok(Temperament::equal(divisions.trim().parse()?, &subgroup)?);
     }
     let commas = definition
         .split([',', ' '])

@@ -3,17 +3,15 @@
 use diophantine::{Matrix, eye, hnf, kernel_left, kernel_right, lll, saturation, transpose};
 
 use crate::Error;
-use crate::primes::{Subgroup, Weighting};
+use crate::primes::Subgroup;
 
 /// A regular temperament: a linear map from the interval vectors of a just
 /// intonation subgroup to a free abelian group of lower rank.
 ///
 /// Internally this is stored as a mapping matrix (rows are generators,
-/// columns are basis elements of the subgroup), always kept in canonical
-/// form: saturated (i.e. defactored - no contorsion) and reduced to Hermite
+/// columns are basis elements of the subgroup), always reduced to Hermite
 /// normal form. Two mapping matrices describe the same temperament exactly
-/// when they have the same canonical form, regardless of choice of
-/// generators.
+/// when they have the same HNF.
 ///
 /// A mapping that is not already saturated is refused rather than silently
 /// saturated: saturating it changes which temperament it describes, and
@@ -57,10 +55,7 @@ impl Temperament {
             )));
         }
 
-        // The row lattice is saturated exactly when saturating it changes
-        // nothing: hnf reduces the lattice as given, saturation reduces the
-        // (possibly larger) saturated lattice, and the two agree exactly when
-        // there was no contorsion to begin with.
+        // The lattice is saturated when saturating it changes nothing.
         let canonical = hnf(mapping)?;
         if saturation(mapping)? != canonical {
             return Err(Error::Unsupported(format!(
@@ -109,15 +104,15 @@ impl Temperament {
         Temperament::from_mapping(&mapping, subgroup)
     }
 
-    /// Builds the equal temperament of `edo` divisions of the octave over
+    /// Builds the equal temperament of `steps` divisions of the octave over
     /// `subgroup`: each basis element `p` is mapped to the number of steps of
-    /// `1/edo` octaves that best approximates it, found by scaling `log2(p)` by
-    /// `edo` and rounding.
-    pub fn et(edo: i64, subgroup: &Subgroup) -> Result<Self, Error> {
+    /// `1/steps` octaves that best approximates it, found by scaling `log2(p)` by
+    /// `steps` and rounding.
+    pub fn equal(steps: i64, subgroup: &Subgroup) -> Result<Self, Error> {
         let map: Vec<i64> = subgroup
             .basis()
             .iter()
-            .map(|&p| (edo as f64 * f64::from(p).log2()).round_ties_even() as i64)
+            .map(|&p| (steps as f64 * f64::from(p).log2()).round_ties_even() as i64)
             .collect();
         Temperament::from_mapping(&vec![map], subgroup)
     }
@@ -153,16 +148,14 @@ impl Temperament {
         Ok(transpose(&columns))
     }
 
-    /// A basis for the comma lattice, reduced (via LLL under [`Weighting::Wilson`])
-    /// to small, musically sensible commas. Each returned comma is normalized to
-    /// be greater than unison.
+    /// A basis for the comma lattice, reduced via LLL to small, musically sensible commas.
+    /// Each returned comma is normalized to be greater than unison.
     pub fn reduced_comma_basis(&self) -> Result<Vec<Vec<i64>>, Error> {
         let commas = self.comma_basis()?;
         if commas.is_empty() {
             return Ok(commas);
         }
-
-        let weights = self.subgroup.weights(Weighting::Wilson);
+        let weights = self.subgroup.weights();
         let reduced = lll(&commas, 0.99, &weights)?;
         Ok(reduced
             .iter()
@@ -215,10 +208,10 @@ mod tests {
     }
 
     #[test]
-    fn et_12edo_5limit() {
+    fn et_12et_5limit() {
         let s = Subgroup::p_limit(5);
-        // 12edo: 2 -> 12 steps, 3 -> 19 steps, 5 -> 28 steps.
-        let t = Temperament::et(12, &s).unwrap();
+        // 12et: 2 -> 12 steps, 3 -> 19 steps, 5 -> 28 steps.
+        let t = Temperament::equal(12, &s).unwrap();
         assert_eq!(t.mapping(), &vec![vec![12, 19, 28]]);
     }
 
@@ -226,7 +219,7 @@ mod tests {
     fn et_over_subgroup() {
         // 2.3.7 is not a prime limit: 7 is mapped, 5 is not part of the group.
         let s: Subgroup = "2.3.7".parse().unwrap();
-        let t = Temperament::et(12, &s).unwrap();
+        let t = Temperament::equal(12, &s).unwrap();
         assert_eq!(t.mapping(), &vec![vec![12, 19, 34]]);
         assert_eq!(t.subgroup(), &s);
         assert_eq!(t.dim(), 3);
@@ -243,7 +236,7 @@ mod tests {
     #[test]
     fn reduced_commas_of_12et() {
         let s = Subgroup::p_limit(5);
-        let t = Temperament::et(12, &s).unwrap();
+        let t = Temperament::equal(12, &s).unwrap();
         let commas = t.reduced_comma_basis().unwrap();
         // Rank 1 over a rank 3 group, so the comma lattice has rank 2.
         assert_eq!(commas.len(), 2);
@@ -259,8 +252,8 @@ mod tests {
     #[test]
     fn reduced_commas_of_miracle() {
         let s = Subgroup::p_limit(11);
-        let m31 = Temperament::et(31, &s).unwrap();
-        let m41 = Temperament::et(41, &s).unwrap();
+        let m31 = Temperament::equal(31, &s).unwrap();
+        let m41 = Temperament::equal(41, &s).unwrap();
         assert_eq!(m31.mapping(), &vec![vec![31, 49, 72, 87, 107]]);
         assert_eq!(m41.mapping(), &vec![vec![41, 65, 95, 115, 142]]);
 
@@ -310,7 +303,7 @@ mod tests {
         // odd number, so it saturates to 12et rather than describing itself.
         // 24et over 2.3.5.11 is what to ask for instead - its quartertone
         // breaks the contorsion.
-        assert!(Temperament::et(24, &s).is_err());
-        assert!(Temperament::et(24, &"2.3.5.11".parse().unwrap()).is_ok());
+        assert!(Temperament::equal(24, &s).is_err());
+        assert!(Temperament::equal(24, &"2.3.5.11".parse().unwrap()).is_ok());
     }
 }

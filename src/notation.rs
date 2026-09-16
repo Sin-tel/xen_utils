@@ -606,7 +606,7 @@ mod tests {
     /// offers.
     fn et_options(divisions: i64, subgroup: &str) -> Vec<Notation> {
         let subgroup: Subgroup = subgroup.parse().unwrap();
-        let temperament = Temperament::et(divisions, &subgroup).unwrap();
+        let temperament = Temperament::equal(divisions, &subgroup).unwrap();
         Notation::options(&temperament).unwrap()
     }
 
@@ -842,7 +842,7 @@ mod tests {
         // 12et tempers out 81/80, so it is notated as meantone is: rank 2 over
         // a rank 1 temperament, which is what leaves C# and Db to differ.
         let subgroup = Subgroup::p_limit(5);
-        let n = Notation::from_temperament(&Temperament::et(12, &subgroup).unwrap()).unwrap();
+        let n = Notation::from_temperament(&Temperament::equal(12, &subgroup).unwrap()).unwrap();
         // The notations differ only in the temperament they carry.
         let meantone = tempered("2.3.5", &[(81, 80)]);
         assert_eq!(n.generators(), meantone.generators());
@@ -997,7 +997,7 @@ mod tests {
         // downs is built on - so these have no notation.
         for divisions in [25, 51, 54] {
             let subgroup: Subgroup = "2.3.5".parse().unwrap();
-            let temperament = Temperament::et(divisions, &subgroup).unwrap();
+            let temperament = Temperament::equal(divisions, &subgroup).unwrap();
             assert!(Notation::options(&temperament).is_err());
         }
 
@@ -1072,7 +1072,7 @@ mod tests {
         // nominal, and the largest only turns the two marks of the middle one
         // into one of another kind, so the middle one is what is wanted.
         let subgroup: Subgroup = "2.3.5.7.11".parse().unwrap();
-        let temperament = Temperament::et(41, &subgroup).unwrap();
+        let temperament = Temperament::equal(41, &subgroup).unwrap();
         let options = Notation::options(&temperament).unwrap();
         assert_eq!(ranks(&options), vec![2, 3, 4]);
         assert_eq!(
@@ -1140,7 +1140,7 @@ mod tests {
     #[test]
     fn a_temperament_accepts_each_requested_11_limit_prefix() {
         let subgroup: Subgroup = "2.3.5.7.11".parse().unwrap();
-        let temperament = Temperament::et(41, &subgroup).unwrap();
+        let temperament = Temperament::equal(41, &subgroup).unwrap();
         let accidentals =
             [(81, 80), (64, 63), (33, 32)].map(|(num, den)| subgroup.factorize(num, den).unwrap());
 
@@ -1163,7 +1163,7 @@ mod tests {
     #[test]
     fn an_accidental_list_must_reach_every_pitch() {
         let subgroup: Subgroup = "2.3.5".parse().unwrap();
-        let temperament = Temperament::et(25, &subgroup).unwrap();
+        let temperament = Temperament::equal(25, &subgroup).unwrap();
         assert!(Notation::from_accidentals(&temperament, &[]).is_err());
 
         let syntonic = subgroup.factorize(81, 80).unwrap();
@@ -1186,7 +1186,7 @@ mod tests {
         // accidentals. That difference is the enharmonic lattice, and in 12et
         // it is exactly what leaves C# and Db to differ.
         let subgroup = Subgroup::p_limit(5);
-        let t = Temperament::et(12, &subgroup).unwrap();
+        let t = Temperament::equal(12, &subgroup).unwrap();
         let n = Notation::from_accidentals(&t, &[]).unwrap();
         assert_eq!(n.enharmonics().len(), 1);
         // Twelve fifths less seven octaves, which is the pythagorean comma.
@@ -1201,7 +1201,7 @@ mod tests {
         // with an accidental leaves two - its octave being twenty two steps and
         // its fifth thirteen, which is the whole of ups and downs in 22et.
         let subgroup: Subgroup = "2.3.5.7".parse().unwrap();
-        let t = Temperament::et(22, &subgroup).unwrap();
+        let t = Temperament::equal(22, &subgroup).unwrap();
         let syntonic = subgroup.factorize(81, 80).unwrap();
         let bare = Notation::from_accidentals(&t, &[]).unwrap();
         let raised = Notation::from_accidentals(&t, &[syntonic]).unwrap();
@@ -1216,7 +1216,7 @@ mod tests {
         // the temperament, and each is a non-unison it tempers out.
         for (divisions, subgroup) in [(12, "2.3.5"), (22, "2.3.5.7"), (41, "2.3.5.7.11")] {
             let subgroup: Subgroup = subgroup.parse().unwrap();
-            let t = Temperament::et(divisions, &subgroup).unwrap();
+            let t = Temperament::equal(divisions, &subgroup).unwrap();
             let accidentals = Notation::from_ji(&subgroup).unwrap().generators()[2..].to_vec();
             for count in 0..=accidentals.len() {
                 let Ok(n) = Notation::from_accidentals(&t, &accidentals[..count]) else {

@@ -21,6 +21,6 @@ mod util;
 pub use diophantine::Matrix;
 pub use error::Error;
 pub use notation::Notation;
-pub use primes::{Subgroup, Weighting};
+pub use primes::Subgroup;
 pub use simplify::Simplifier;
 pub use temperament::Temperament;

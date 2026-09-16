@@ -171,14 +171,11 @@ impl Subgroup {
 
     /// The diagonal weight matrix on interval-vector coordinates, under
     /// `weighting`.
-    pub fn weights(&self, weighting: Weighting) -> Matrix<f64> {
+    pub fn weights(&self) -> Matrix<f64> {
         let n = self.dim();
         let mut w = vec![vec![0.0; n]; n];
         for (i, &p) in self.basis.iter().enumerate() {
-            w[i][i] = match weighting {
-                Weighting::Tenney => f64::from(p).log2().powi(2),
-                Weighting::Wilson => f64::from(p).powi(2),
-            };
+            w[i][i] = f64::from(p).powi(2);
         }
         w
     }
@@ -270,18 +267,6 @@ impl FromStr for Subgroup {
             .collect::<Result<Vec<u32>, Error>>()?;
         Subgroup::new(basis)
     }
-}
-
-/// A choice of metric for how "complex" a prime is - used to weight
-/// interval-vector coordinates for lattice algorithms (LLL, CVP), so that
-/// "small" means acoustically/harmonically small, not just small integers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Weighting {
-    /// `log2(prime)^2` - Tenney height: complexity grows with cents.
-    Tenney,
-    /// `prime^2` - Wilson height: complexity grows with the prime itself.
-    #[default]
-    Wilson,
 }
 
 #[cfg(test)]

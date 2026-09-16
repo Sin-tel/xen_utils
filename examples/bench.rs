@@ -30,7 +30,7 @@ fn main() {
     ] {
         println!("\n== {label} ==");
         let subgroup: Subgroup = subgroup.parse().unwrap();
-        let temperament = Temperament::et(divisions, &subgroup).unwrap();
+        let temperament = Temperament::equal(divisions, &subgroup).unwrap();
         let notation = Notation::from_temperament(&temperament).unwrap();
         let simplifier = Simplifier::new(&notation).unwrap();
         println!(
