@@ -317,6 +317,48 @@ mod tests {
     }
 
     #[test]
+    fn a_second_round_can_still_improve_on_the_first() {
+        // `search`'s round loop keeps re-centring on the best point found so
+        // far, rather than searching one ball around the seed and stopping -
+        // which is what it could afford to do if the first ball always settled
+        // the question, the way `Notation::respell`'s single ball does.
+        //
+        // Augmented's accidental is a comma that moves quickly along the fifth
+        // chain, so six of them lands somewhere the first ball's local optimum,
+        // `[-31, 24, -3]`, is not the simplest interval: a second, genuinely
+        // improving round - not just the confirming pass after it - trades the
+        // fifth for two more fifths and drops the accidental's prime entirely,
+        // one lighter under sopfr. Stopping after one ball would silently
+        // return the heavier answer instead.
+        let subgroup: Subgroup = "2.3.5".parse().unwrap();
+        let comma = subgroup.factorize(128, 125).unwrap();
+        let temperament = Temperament::from_commas(&[comma], &subgroup).unwrap();
+        let notation = Notation::from_temperament(&temperament).unwrap();
+        let simplifier = Simplifier::new(&notation).unwrap();
+
+        let stacked = stack(&notation, 6);
+        let all = simplifier.candidates(&stacked, usize::MAX).unwrap();
+
+        assert_eq!(
+            subgroup.to_ratio(&all[0]).unwrap(),
+            (282_429_536_481, 274_877_906_944)
+        );
+
+        // The first ball's own local optimum is still among everything the
+        // walk passed over, but no longer the answer: it ranks behind the
+        // point the second round found.
+        let one_ball = vec![-31i64, 24, -3];
+        let one_ball_rank = all
+            .iter()
+            .position(|candidate| candidate == &one_ball)
+            .expect("the first ball's local optimum is one of the points the walk visited");
+        assert!(
+            one_ball_rank > 0,
+            "the walk should have found something better than the first ball's optimum"
+        );
+    }
+
+    #[test]
     fn simplifying_keeps_the_pitch_and_settles() {
         for (divisions, subgroup) in [(41, "2.3.5.7.11"), (31, "2.3.5.7"), (22, "2.3.5")] {
             let (notation, simplifier) = simplifier(divisions, subgroup);
