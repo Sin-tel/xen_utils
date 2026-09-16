@@ -18,13 +18,13 @@ use crate::util::{is_zero, select};
 /// [`Self::accidentals`] throughout.
 pub(crate) struct Search<'a> {
     temperament: &'a Temperament,
-    /// One accidental per prime beyond 3, in order of the primes.
+    /// One accidental per prime beyond 3 that the temperament does not temper
+    /// out, in order of the primes. One it does temper out would raise by
+    /// nothing, so it is never worth keeping and is dropped here rather than
+    /// filtered out later.
     accidentals: Matrix<i64>,
     /// What each accidental maps to in the temperament.
     images: Matrix<i64>,
-    /// The accidentals the temperament does not temper out. One it does temper
-    /// out would raise by nothing, so it is never worth keeping.
-    useful: Vec<usize>,
 }
 
 impl<'a> Search<'a> {
@@ -35,18 +35,17 @@ impl<'a> Search<'a> {
     /// Returns [`Error::Unsupported`] if some prime has no accidental.
     pub(crate) fn new(temperament: &'a Temperament) -> Result<Self, Error> {
         let subgroup = temperament.subgroup();
-        let accidentals: Matrix<i64> = (2..subgroup.dim())
+        let derived: Matrix<i64> = (2..subgroup.dim())
             .map(|index| accidental(subgroup, index))
             .collect::<Result<_, Error>>()?;
-        let images = temperament.map_all(&accidentals)?;
-        let useful = (0..accidentals.len())
-            .filter(|&index| !is_zero(&images[index]))
+        let derived_images = temperament.map_all(&derived)?;
+        let useful: Vec<usize> = (0..derived.len())
+            .filter(|&index| !is_zero(&derived_images[index]))
             .collect();
         Ok(Search {
             temperament,
-            accidentals,
-            images,
-            useful,
+            accidentals: select(&derived, &useful),
+            images: select(&derived_images, &useful),
         })
     }
 
@@ -88,18 +87,14 @@ impl<'a> Search<'a> {
     /// one step, since that one is preferred over all others.
     fn candidates(&self) -> Vec<usize> {
         if self.temperament.rank() != 1 {
-            return self.useful.clone();
+            return (0..self.accidentals.len()).collect();
         }
-        let step = self
-            .useful
-            .iter()
-            .copied()
-            .find(|&index| self.images[index][0].abs() == 1);
+        let step = (0..self.accidentals.len()).find(|&index| self.images[index][0].abs() == 1);
         let Some(step) = step else {
             return Vec::new();
         };
         std::iter::once(step)
-            .chain(self.useful.iter().copied().filter(|&index| index != step))
+            .chain((0..self.accidentals.len()).filter(|&index| index != step))
             .collect()
     }
 
