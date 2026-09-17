@@ -1,11 +1,11 @@
 //! Simplifying intervals.
 
-use diophantine::{Matrix, cvp_exact, lll};
+use diophantine::{Matrix, cvp_exact};
 
 use crate::Error;
 use crate::notation::Notation;
 use crate::primes::Subgroup;
-use crate::util::{LLL_DELTA, subtract};
+use crate::util::subtract;
 
 /// How far around the best so far to look, in each direction along each reduced
 /// basis vector. The search steps by this much until nothing nearer is better,
@@ -36,9 +36,7 @@ impl Simplifier {
         let subgroup = notation.subgroup().clone();
         let weights = subgroup.weights();
 
-        let commas = notation.temperament().comma_basis()?;
-        let lattice = lll(&commas, LLL_DELTA, &weights)?;
-
+        let lattice = notation.temperament().reduced_comma_basis()?;
         Ok(Simplifier {
             subgroup,
             lattice,

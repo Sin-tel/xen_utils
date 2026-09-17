@@ -135,7 +135,7 @@ impl Temperament {
     ///
     /// This is whatever basis falls out of the kernel computation and is
     /// usually not musically sensible on its own; see [`Self::reduced_comma_basis`].
-    pub fn comma_basis(&self) -> Result<Vec<Vec<i64>>, Error> {
+    fn comma_basis(&self) -> Result<Vec<Vec<i64>>, Error> {
         let columns = kernel_right(&self.mapping)?;
         Ok(transpose(&columns))
     }

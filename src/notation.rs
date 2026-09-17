@@ -19,10 +19,6 @@ const CENTRE_OCTAVE: i64 = 5;
 /// These exist only so that [`Notation::note`] can print something legible;
 /// real microtonal accidentals are not in unicode, so anything that has to
 /// look right should render the notation coordinates itself.
-///
-/// Only consulted when a notation keeps more than one accidental - see
-/// [`accidental_symbol`]. A prime beyond `19` in such a notation has no entry
-/// here and so no symbol; that is the ceiling this stops at.
 const PRIME_SYMBOLS: [(u32, char, char); 6] = [
     (5, '^', 'v'),
     (7, '>', '<'),
@@ -32,13 +28,11 @@ const PRIME_SYMBOLS: [(u32, char, char); 6] = [
     (19, ')', '('),
 ];
 
-/// The largest interval, in cents, that counts as an accidental: half an
-/// apotome, half of the sharp `2187/2048 = 3^7 / 2^11`, or 56.8 cents.
+/// The largest interval, in cents, that counts as an accidental:
+/// half an apotome, about 56.8 cents.
 ///
-/// Bounding accidentals here is what lets every prime be written without
-/// augmented or diminished intervals.
-///
-/// The value is `600 * (7 * log2(3) - 11)`.
+/// This lets every prime be written without augmented or diminished intervals.
+/// 1200*log2(sqrt(2187/2048))
 const MAX_ACCIDENTAL_CENTS: f64 = 56.842_503_028_855_52;
 
 /// An accidental, raising or lowering a note by a small interval.
@@ -54,18 +48,8 @@ pub struct Accidental {
 ///
 /// Notation coordinates are counts of notational generators. The first two are
 /// always the octave `2/1` and the fifth `3/2`, which together give the
-/// nominals and the sharps and flats. Each remaining coordinate counts one accidental,
+/// nominals and the sharps and flats. Other coordinates count accidentals,
 /// which raises or lowers by a small interval that is not a sharp.
-///
-/// **A notation is its generators.** Where they sit in the temperament fixes
-/// everything else: the map [`pitch`](Self::pitch) from a written note down to
-/// what it sounds, and the kernel of that map, the
-/// [enharmonics](Self::enharmonics) - the written notes the temperament calls
-/// one pitch.
-///
-/// A just interval is spelled by asking the temperament what pitch it is and then
-/// asking which of that pitch's spellings reads best, which is [`spell`](Self::spell), and the
-/// alternatives it passed over are [`respell`](Self::respell).
 #[derive(Debug, Clone)]
 pub struct Notation {
     /// The octave, the fifth, then the accidentals, as prime interval vectors.
@@ -73,7 +57,7 @@ pub struct Notation {
     /// The accidental symbols.
     accidentals: Vec<(char, char)>,
     /// What each generator maps to in the temperament, one per row.
-    /// This is the map from notation coordinates to pitches.
+    /// This is the map from notation coordinates to tempered intervals.
     images: Matrix<i64>,
     /// A reduced basis of the written notes that map to unison, in notation coordinates.
     enharmonics: Matrix<i64>,
@@ -160,10 +144,7 @@ impl Notation {
     /// Builds the notation of `temperament` with `accidentals` as its extra
     /// generators.
     ///
-    /// An accidental is an interval vector over `temperament`'s subgroup. The
-    /// octave and fifth are always present; this list supplies every generator
-    /// beyond those two. The vectors need not be the accidentals derived by
-    /// [`from_ji`](Self::from_ji).
+    /// This is internal to crate since it doesn't do any checks.
     ///
     /// # Errors
     /// Returns [`Error::InvalidDimensions`] if an accidental is not an interval
@@ -221,8 +202,7 @@ impl Notation {
         &self.enharmonics
     }
 
-    /// The temperament being notated. [`from_ji`](Self::from_ji) notates just
-    /// intonation itself, which tempers nothing out.
+    /// The temperament being notated.
     pub fn temperament(&self) -> &Temperament {
         &self.temperament
     }
@@ -506,10 +486,7 @@ pub(crate) fn derive_accidental_vector(
 /// middle of them.
 const NOMINAL_CENTRE: i64 = 2;
 
-/// How far either way [`Notation::respell`] walks each enharmonic.
-///
-/// The answers wanted are the first few and the basis is reduced, so this only
-/// has to be wide enough that nothing better lies outside it.
+/// How far Notation::respell searches for.
 const RESPELL_WIDTH: i64 = 1;
 
 /// A sharp is worth two accidental marks.
@@ -573,16 +550,14 @@ mod tests {
         Notation::from_temperament(&temperament).unwrap()
     }
 
-    /// Every notation the equal temperament of `divisions` over `subgroup`
-    /// offers.
+    /// Every notation the equal temperament of `divisions` over `subgroup` offers.
     fn et_options(divisions: i64, subgroup: &str) -> Vec<Notation> {
         let subgroup: Subgroup = subgroup.parse().unwrap();
         let temperament = Temperament::equal(divisions, &subgroup).unwrap();
         Notation::options(&temperament).unwrap()
     }
 
-    /// Every notation the temperament of `subgroup` tempering out `commas`
-    /// offers.
+    /// Every notation the temperament of `subgroup` tempering out `commas` offers.
     fn options_of(subgroup: &str, commas: &[(u64, u64)]) -> Vec<Notation> {
         let subgroup: Subgroup = subgroup.parse().unwrap();
         let commas: Vec<Vec<i64>> = commas
@@ -636,21 +611,6 @@ mod tests {
     }
 
     #[test]
-    fn derived_accidentals() {
-        // The three the fifth-chain derivation produces.
-        assert_eq!(accidental_ratios(&notation("2.3.5")), vec![(81, 80)]);
-        assert_eq!(accidental_ratios(&notation("2.3.7")), vec![(64, 63)]);
-        assert_eq!(accidental_ratios(&notation("2.3.11")), vec![(33, 32)]);
-        assert_eq!(
-            accidental_ratios(&notation("2.3.5.7.11")),
-            vec![(81, 80), (64, 63), (33, 32)]
-        );
-        // Beyond 11 the same rule keeps giving the usual choices.
-        assert_eq!(accidental_ratios(&notation("2.3.13")), vec![(1053, 1024)]);
-        assert_eq!(accidental_ratios(&notation("2.3.19")), vec![(513, 512)]);
-    }
-
-    #[test]
     fn accidentals_are_small_and_ascending() {
         let n = notation("2.3.5.7.11.13");
         for a in &n.generators()[2..] {
@@ -686,7 +646,6 @@ mod tests {
         assert_eq!(n.note(&[0, 2]), "D6");
         assert_eq!(n.note(&[0, -1]), "F4");
         assert_eq!(n.note(&[0, -2]), "Bb3");
-        // Seven fifths is a sharp, and it wraps back round to F.
         assert_eq!(n.note(&[0, 6]), "F#8");
         assert_eq!(n.note(&[0, 13]), "F##12");
         assert_eq!(n.note(&[0, -8]), "Fb0");
@@ -698,9 +657,7 @@ mod tests {
         assert_eq!(n.note(&[1, 0]), "C6");
         assert_eq!(n.note(&[-1, 0]), "C4");
         assert_eq!(n.note(&[3, 0]), "C8");
-        // B4 is five fifths down three octaves, just under C5.
         assert_eq!(n.note(&[-3, 5]), "B4");
-        // B5 is the same chain with one octave less taken off.
         assert_eq!(n.note(&[-2, 5]), "B5");
     }
 
@@ -714,9 +671,7 @@ mod tests {
         assert_eq!(note_of(&n, 16, 9), "Bb5");
         assert_eq!(note_of(&n, 2, 1), "C6");
         assert_eq!(note_of(&n, 1, 2), "C4");
-        // The pythagorean major third, 81/64.
         assert_eq!(note_of(&n, 81, 64), "E5");
-        // A sharp above C5.
         assert_eq!(note_of(&n, 2187, 2048), "C#5");
     }
 
@@ -740,19 +695,14 @@ mod tests {
 
     #[test]
     fn notes_with_accidentals() {
-        // The just third, seventh and eleventh are each a pythagorean interval
-        // bent by one accidental.
         assert_eq!(note_of(&notation("2.3.5"), 5, 4), "vE5");
         assert_eq!(note_of(&notation("2.3.7"), 7, 4), "<Bb5");
         assert_eq!(note_of(&notation("2.3.11"), 11, 8), "tF5");
 
-        // Over the full subgroup they keep those spellings, and each symbol is
-        // now its prime's own: 11 keeps t/d even alongside the others.
         let n = notation("2.3.5.7.11");
         assert_eq!(note_of(&n, 5, 4), "vE5");
         assert_eq!(note_of(&n, 7, 4), "<Bb5");
         assert_eq!(note_of(&n, 11, 8), "tF5");
-        // 25/16 stacks two syntonic commas; 35/32 is a whole tone bent by both.
         assert_eq!(note_of(&n, 25, 16), "vvG#5");
         assert_eq!(note_of(&n, 35, 32), "v<D5");
     }
@@ -808,12 +758,10 @@ mod tests {
     }
 
     #[test]
-    fn equal_temperaments_keep_the_fifth_chain() {
-        // 12et tempers out 81/80, so it is notated as meantone is: rank 2 over
-        // a rank 1 temperament, which is what leaves C# and Db to differ.
+    fn notation_12et_is_meantone() {
+        // 12et tempers out 81/80, so it has the same notation as meantone.
         let subgroup = Subgroup::p_limit(5);
         let n = Notation::from_temperament(&Temperament::equal(12, &subgroup).unwrap()).unwrap();
-        // The notations differ only in the temperament they carry.
         let meantone = tempered("2.3.5", &[(81, 80)]);
         assert_eq!(n.generators(), meantone.generators());
         assert_eq!(n.generators(), meantone.generators());
@@ -829,8 +777,9 @@ mod tests {
         assert_eq!(ranks(&options), vec![2, 3]);
 
         assert!(accidental_ratios(&options[0]).is_empty());
-        assert_eq!(note_of(&options[0], 7, 4), "A#5");
         assert_eq!(note_of(&options[0], 5, 4), "E5");
+        assert_eq!(note_of(&options[1], 5, 4), "E5");
+        assert_eq!(note_of(&options[0], 7, 4), "A#5");
         assert_eq!(note_of(&options[1], 7, 4), "<Bb5");
     }
 

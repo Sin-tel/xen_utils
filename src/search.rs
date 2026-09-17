@@ -1,8 +1,3 @@
-//! The search behind [`Notation::options`].
-//!
-//! The whole of the public surface is that one function, so this module is
-//! tested through it rather than on its own.
-
 use diophantine::Matrix;
 
 use crate::Error;
@@ -10,28 +5,14 @@ use crate::notation::{Accidental, Notation, fifth_chain, spans};
 use crate::temperament::Temperament;
 use crate::util::{is_zero, select};
 
-/// The derivation of the notations one temperament offers.
-///
-/// Everything the search does hangs off the accidentals and what each is maps
-/// to in the temperament, so those are worked out once here and the rest of the
-/// search is methods on them. Accidentals are passed around as indices into
-/// [`Self::accidentals`] throughout.
 pub(crate) struct Search<'a> {
     temperament: &'a Temperament,
-    /// One accidental per prime beyond 3 that the temperament does not temper
-    /// out, in order of the primes. One it does temper out would raise by
-    /// nothing, so it is never worth keeping and is dropped here rather than
-    /// filtered out later.
     accidentals: Vec<Accidental>,
     /// What each accidental maps to in the temperament.
     images: Matrix<i64>,
 }
 
 impl<'a> Search<'a> {
-    /// Derives the accidentals of the temperament's subgroup and what each one
-    /// is worth to it.
-    ///
-    /// # Errors
     /// Returns [`Error::Unsupported`] if some prime has no accidental.
     pub(crate) fn new(
         temperament: &'a Temperament,
@@ -87,21 +68,19 @@ impl<'a> Search<'a> {
             .collect()
     }
 
-    /// The accidentals a notation may use, in order.
-    ///
-    /// For an equal temperament, we first look for an accidental that maps to
-    /// one step, since that one is preferred over all others.
     fn candidates(&self) -> Vec<usize> {
         if self.temperament.rank() != 1 {
             return (0..self.accidentals.len()).collect();
         }
+        // For an equal temperament, we first look for an accidental that maps to
+        // one step, since that one is preferred over all others.
         let step = (0..self.accidentals.len()).find(|&index| self.images[index][0].abs() == 1);
-        let Some(step) = step else {
-            return Vec::new();
-        };
-        std::iter::once(step)
-            .chain((0..self.accidentals.len()).filter(|&index| index != step))
-            .collect()
+        match step {
+            Some(step) => std::iter::once(step)
+                .chain((0..self.accidentals.len()).filter(|&index| index != step))
+                .collect(),
+            None => Vec::new(),
+        }
     }
 
     /// The smallest subset of `candidates` that makes a notation possible at all.
@@ -110,17 +89,17 @@ impl<'a> Search<'a> {
             // Subsets in lexicographic order, so that the accidentals offered
             // first are the ones kept where there is a choice.
             for subset in subsets(candidates, size) {
-                if self.reaches(&subset)? {
+                if self.spans(&subset)? {
                     return Ok(subset);
                 }
             }
         }
-        Err(self.nothing_reaches())
+        Err(self.nothing_spans())
     }
 
     /// Whether the octave, the fifth and the accidentals at `keep` reach every
-    /// pitch of the temperament. Where they do not, some pitch has no spelling.
-    fn reaches(&self, keep: &[usize]) -> Result<bool, Error> {
+    /// pitch of the temperament.
+    fn spans(&self, keep: &[usize]) -> Result<bool, Error> {
         let mut generators = fifth_chain(self.temperament.dim());
         generators.extend(keep.iter().map(|&i| self.accidentals[i].vector.clone()));
         let images = self.temperament.map_all(&generators)?;
@@ -128,7 +107,7 @@ impl<'a> Search<'a> {
     }
 
     /// Why no subset of the candidates reaches every pitch.
-    fn nothing_reaches(&self) -> Error {
+    fn nothing_spans(&self) -> Error {
         let subgroup = self.temperament.subgroup();
         if self.temperament.rank() == 1 {
             return Error::Unsupported(format!(
@@ -142,12 +121,11 @@ impl<'a> Search<'a> {
     }
 }
 
-/// Two accidentals do the same thing if they agree up to sign.
 fn equal_up_to_sign(one: &[i64], other: &[i64]) -> bool {
     one == other || one.iter().zip(other).all(|(a, b)| *a == -b)
 }
 
-/// The subsets of `items` of size `size`, in lexicographic order.
+/// Subsets of `items` of size `size`, in lexicographic order.
 fn subsets(items: &[usize], size: usize) -> Vec<Vec<usize>> {
     if size == 0 {
         return vec![Vec::new()];
