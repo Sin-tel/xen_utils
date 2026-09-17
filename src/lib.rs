@@ -11,8 +11,8 @@
 
 pub mod error;
 pub mod notation;
+mod notation_options;
 pub mod primes;
-mod search;
 pub mod simplify;
 pub mod temperament;
 mod util;

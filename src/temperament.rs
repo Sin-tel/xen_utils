@@ -68,7 +68,7 @@ impl Temperament {
     /// # Errors
     /// Returns [`Error::InvalidDimensions`] if the identity is somehow not a
     /// valid mapping over `subgroup`.
-    pub fn just(subgroup: &Subgroup) -> Result<Self, Error> {
+    pub fn from_ji(subgroup: &Subgroup) -> Result<Self, Error> {
         Temperament::from_mapping(&eye(subgroup.dim()), subgroup)
     }
 

@@ -10,7 +10,7 @@ fn main() {
     let subgroup: Subgroup = "2.3.5.7.11".parse().unwrap();
     let temperament = Temperament::equal(DIVISIONS, &subgroup).unwrap();
     let notation = Notation::from_temperament(&temperament).unwrap();
-    let simplifier = Simplifier::new(&notation).unwrap();
+    let simplifier = Simplifier::new(&temperament).unwrap();
 
     for steps in STEPS {
         // The stack of ups that reaches this step, which is the awkward

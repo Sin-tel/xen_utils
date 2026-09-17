@@ -5,14 +5,14 @@ use crate::notation::{Accidental, Notation, fifth_chain, spans};
 use crate::temperament::Temperament;
 use crate::util::{is_zero, select};
 
-pub(crate) struct Search<'a> {
+pub(crate) struct NotationOptions<'a> {
     temperament: &'a Temperament,
     accidentals: Vec<Accidental>,
     /// What each accidental maps to in the temperament.
     images: Matrix<i64>,
 }
 
-impl<'a> Search<'a> {
+impl<'a> NotationOptions<'a> {
     /// Returns [`Error::Unsupported`] if some prime has no accidental.
     pub(crate) fn new(
         temperament: &'a Temperament,
@@ -27,7 +27,7 @@ impl<'a> Search<'a> {
         let filtered_accidentals: Vec<Accidental> =
             useful.iter().map(|&i| accidentals[i].clone()).collect();
 
-        Ok(Search {
+        Ok(NotationOptions {
             temperament,
             accidentals: filtered_accidentals,
             images: select(&derived_images, &useful),
@@ -35,7 +35,7 @@ impl<'a> Search<'a> {
     }
 
     /// Every notation the temperament offers, smallest first.
-    pub(crate) fn run(&self) -> Result<Vec<Notation>, Error> {
+    pub(crate) fn search(&self) -> Result<Vec<Notation>, Error> {
         let candidates = self.candidates();
         let necessary = self.necessary(&candidates)?;
 

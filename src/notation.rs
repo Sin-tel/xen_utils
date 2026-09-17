@@ -3,8 +3,8 @@
 use diophantine::{Matrix, cvp_exact, eye, kernel_left, lll, solve_diophantine, transpose};
 
 use crate::Error;
+use crate::notation_options::NotationOptions;
 use crate::primes::Subgroup;
-use crate::search::Search;
 use crate::temperament::Temperament;
 use crate::util::{LLL_DELTA, column, combination, first_column};
 
@@ -78,7 +78,7 @@ impl Notation {
     /// than there are accidental symbols, or if some prime has no accidental.
     pub fn from_ji(subgroup: &Subgroup) -> Result<Self, Error> {
         let accidentals = derive_accidentals(subgroup)?;
-        Notation::from_accidentals(&Temperament::just(subgroup)?, &accidentals)
+        Notation::from_accidentals(&Temperament::from_ji(subgroup)?, &accidentals)
     }
 
     /// Builds the recommended notation of `temperament`: the smallest of
@@ -138,7 +138,7 @@ impl Notation {
         temperament: &Temperament,
         accidentals: &[Accidental],
     ) -> Result<Vec<Self>, Error> {
-        Search::new(temperament, accidentals)?.run()
+        NotationOptions::new(temperament, accidentals)?.search()
     }
 
     /// Builds the notation of `temperament` with `accidentals` as its extra

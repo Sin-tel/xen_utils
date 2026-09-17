@@ -1,9 +1,9 @@
-//! Simplifying intervals.
+//! Simplifying just intervals.
 
 use diophantine::{Matrix, cvp_exact};
 
 use crate::Error;
-use crate::notation::Notation;
+use crate::Temperament;
 use crate::primes::Subgroup;
 use crate::util::subtract;
 
@@ -15,9 +15,6 @@ const SEARCH_RADIUS: i64 = 2;
 /// Rewrites a just interval as the simplest one the temperament makes equal to
 /// it.
 ///
-/// The intervals a temperament calls the same are the cosets of its comma
-/// lattice, so simplifying is a closest vector problem.
-///
 /// "Simplest" here means the Wilson norm [`sopfr`].
 #[derive(Debug, Clone)]
 pub struct Simplifier {
@@ -27,16 +24,16 @@ pub struct Simplifier {
 }
 
 impl Simplifier {
-    /// Builds the simplifier of the temperament `notation` notates.
+    /// Builds the simplifier over the temperament.
     ///
     /// # Errors
     /// Returns [`Error::InvalidDimensions`] if the comma lattice cannot be
     /// computed or reduced.
-    pub fn new(notation: &Notation) -> Result<Self, Error> {
-        let subgroup = notation.subgroup().clone();
+    pub fn new(temperament: &Temperament) -> Result<Self, Error> {
+        let subgroup = temperament.subgroup().clone();
         let weights = subgroup.weights();
 
-        let lattice = notation.temperament().reduced_comma_basis()?;
+        let lattice = temperament.reduced_comma_basis()?;
         Ok(Simplifier {
             subgroup,
             lattice,
@@ -172,6 +169,7 @@ pub fn sopfr(interval: &[i64], primes: &[u32]) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Notation;
     use crate::temperament::Temperament;
 
     /// A notation of the equal temperament of `divisions` over `subgroup`, and
@@ -185,7 +183,7 @@ mod tests {
         let temperament = Temperament::equal(divisions, &subgroup).unwrap();
         let options = Notation::options(&temperament).unwrap();
         let notation = options.last().unwrap().clone();
-        let simplifier = Simplifier::new(&notation).unwrap();
+        let simplifier = Simplifier::new(&temperament).unwrap();
         (notation, simplifier)
     }
 
@@ -332,7 +330,7 @@ mod tests {
         let comma = subgroup.factorize(128, 125).unwrap();
         let temperament = Temperament::from_commas(&[comma], &subgroup).unwrap();
         let notation = Notation::from_temperament(&temperament).unwrap();
-        let simplifier = Simplifier::new(&notation).unwrap();
+        let simplifier = Simplifier::new(&temperament).unwrap();
 
         let stacked = stack(&notation, 6);
         let all = simplifier.candidates(&stacked, usize::MAX).unwrap();
@@ -401,26 +399,6 @@ mod tests {
     }
 
     #[test]
-    fn every_notation_of_a_temperament_simplifies_alike() {
-        // The comma lattice is the temperament's, so the notation only decides
-        // how the answer is spelled.
-        let subgroup: Subgroup = "2.3.5.7.11".parse().unwrap();
-        let temperament = Temperament::equal(41, &subgroup).unwrap();
-        let options = Notation::options(&temperament).unwrap();
-        assert_eq!(options.len(), 3);
-
-        let interval = subgroup.factorize(45, 32).unwrap();
-        let simplest = Simplifier::new(&options[0])
-            .unwrap()
-            .simplify(&interval)
-            .unwrap();
-        for option in &options {
-            let simplifier = Simplifier::new(option).unwrap();
-            assert_eq!(simplifier.simplify(&interval).unwrap(), simplest);
-        }
-    }
-
-    #[test]
     fn the_candidates_are_ranked_readings_of_one_pitch() {
         // Fifteen steps of 41et, where the simplest reading is not the most
         // convenient spelling: 9/7 costs three marks and means something, and
@@ -457,8 +435,7 @@ mod tests {
     #[test]
     fn just_intonation_has_nothing_to_simplify() {
         let subgroup: Subgroup = "2.3.5.7".parse().unwrap();
-        let notation = Notation::from_ji(&subgroup).unwrap();
-        let simplifier = Simplifier::new(&notation).unwrap();
+        let simplifier = Simplifier::new(&Temperament::from_ji(&subgroup).unwrap()).unwrap();
 
         assert!(simplifier.lattice().is_empty());
         let interval = subgroup.factorize(225, 224).unwrap();
