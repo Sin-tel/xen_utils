@@ -1,24 +1,23 @@
 //! Simplifying just intervals.
 
-use diophantine::{Matrix, cvp_exact};
+use diophantine::{Matrix, cvp_l1_top_k};
 
 use crate::Error;
 use crate::Temperament;
 use crate::util::subtract;
 
-/// How far around the best so far to look, in each direction along each reduced
-/// basis vector. The search steps by this much until nothing nearer is better,
-/// so the radius bounds one step rather than the whole walk.
-const SEARCH_RADIUS: i64 = 2;
-
 /// Finds the simplest just intervals that temper to a given tempered interval.
 ///
-/// "Simplest" here means the Wilson norm [`sopfr`].
+/// "Simplest" here means the Wilson norm [`sopfr`], with ties broken by the
+/// quadratic norm under `diag(p²)` and then by the interval itself. The search
+/// is exact: `sopfr` is a weighted L1 norm, and the lattice enumeration prunes
+/// on the quadratic norm, which never exceeds it.
 #[derive(Debug, Clone)]
 pub struct Simplifier {
     temperament: Temperament,
     lattice: Matrix<i64>,
-    weights: Matrix<f64>,
+    /// The primes of the subgroup: the weights `sopfr` gives each exponent.
+    primes: Vec<i64>,
 }
 
 impl Simplifier {
@@ -28,12 +27,17 @@ impl Simplifier {
     /// Returns [`Error::InvalidDimensions`] if the comma lattice cannot be
     /// computed or reduced.
     pub fn new(temperament: &Temperament) -> Result<Self, Error> {
-        let weights = temperament.subgroup().weights();
         let lattice = temperament.reduced_comma_basis()?;
+        let primes = temperament
+            .subgroup()
+            .basis()
+            .iter()
+            .map(|&p| i64::from(p))
+            .collect();
         Ok(Simplifier {
             temperament: temperament.clone(),
             lattice,
-            weights,
+            primes,
         })
     }
 
@@ -48,9 +52,7 @@ impl Simplifier {
     /// Returns [`Error::InvalidDimensions`] if `tempered` does not have one
     /// entry per generator of the temperament.
     pub fn simplify(&self, tempered: &[i64]) -> Result<Vec<i64>, Error> {
-        Ok(self
-            .simplify_within(tempered, SEARCH_RADIUS)?
-            .swap_remove(0))
+        Ok(self.simplifications(tempered, 1)?.swap_remove(0))
     }
 
     /// [`simplify`](Self::simplify) the tempered interval a just interval maps
@@ -64,15 +66,24 @@ impl Simplifier {
     }
 
     /// The `count` simplest just intervals that temper to `tempered`, simplest
-    /// first. There may be fewer: only those the search walks past are ranked.
+    /// first.
+    ///
+    /// The cost grows with `count`, and the search only closes once it holds
+    /// `count` intervals, so ask for the handful wanted rather than all of them.
+    /// Just intonation has only the one.
     ///
     /// # Errors
     /// Returns [`Error::InvalidDimensions`] if `tempered` does not have one
     /// entry per generator of the temperament.
     pub fn simplifications(&self, tempered: &[i64], count: usize) -> Result<Matrix<i64>, Error> {
-        let mut found = self.simplify_within(tempered, SEARCH_RADIUS)?;
-        found.truncate(count);
-        Ok(found)
+        let interval = self.temperament.preimage(tempered)?;
+        if self.lattice.is_empty() {
+            return Ok(if count == 0 { vec![] } else { vec![interval] });
+        }
+        Ok(cvp_l1_top_k(&interval, &self.lattice, &self.primes, count)?
+            .iter()
+            .map(|comma| subtract(&interval, comma))
+            .collect())
     }
 
     /// [`simplifications`](Self::simplifications) of the tempered interval a
@@ -87,87 +98,6 @@ impl Simplifier {
         count: usize,
     ) -> Result<Matrix<i64>, Error> {
         self.simplifications(&self.temperament.temper(interval)?, count)
-    }
-
-    /// Everything the search walks past, simplest first, stepping by a ball of
-    /// the given radius rather than the one [`SEARCH_RADIUS`] fixes. This is
-    /// what the radius is chosen by.
-    fn simplify_within(&self, tempered: &[i64], radius: i64) -> Result<Matrix<i64>, Error> {
-        let interval = self.temperament.preimage(tempered)?;
-        if self.lattice.is_empty() {
-            return Ok(vec![interval]);
-        }
-
-        // `preimage` hands back an arbitrary interval, so reduce first.
-        let seed = subtract(
-            &interval,
-            &cvp_exact(&interval, &self.lattice, &self.weights)?,
-        );
-        Ok(self.search(&seed, radius))
-    }
-
-    /// Steps from `seed` to the nearest simpler interval until there is none,
-    /// looking `radius` along each reduced basis vector at a time, and returns
-    /// everything it passed over, simplest first.
-    ///
-    /// Ties under [`sopfr`] are common, so we use the quadratic norm and
-    /// the coordinates themselves to break ties.
-    fn search(&self, seed: &[i64], radius: i64) -> Matrix<i64> {
-        // This runs for every point of a ball of `width.pow(lattice.len())`
-        // points, possibly several balls deep, so it is written to allocate once
-        // per point.
-
-        let width = (2 * radius + 1) as usize;
-        let mut best = seed.to_vec();
-        let mut seen = Vec::new();
-
-        // Every round strictly lowers the rank, which cannot go on for ever, so
-        // this terminates whatever the radius.
-        loop {
-            let mut improved = best.clone();
-            let mut improved_rank = self.rank(&improved);
-
-            for point in 0..width.pow(self.lattice.len() as u32) {
-                let mut candidate = best.clone();
-                let mut remaining = point;
-                for row in &self.lattice {
-                    let digit = (remaining % width) as i64 - radius;
-                    remaining /= width;
-                    if digit != 0 {
-                        for (c, &r) in candidate.iter_mut().zip(row) {
-                            *c -= digit * r;
-                        }
-                    }
-                }
-
-                let rank = self.rank(&candidate);
-                if rank < improved_rank {
-                    improved.clone_from(&candidate);
-                    improved_rank = rank;
-                }
-                seen.push((rank, candidate));
-            }
-            if improved == best {
-                break;
-            }
-            best = improved;
-        }
-
-        seen.sort_unstable();
-        seen.dedup();
-        seen.into_iter().map(|(_, interval)| interval).collect()
-    }
-
-    /// What the search minimizes: the Wilson norm, and the quadratic norm
-    /// standing in for it as a tie-break.
-    fn rank(&self, interval: &[i64]) -> (i64, i64) {
-        let primes = self.temperament.subgroup().basis();
-        let squared = interval
-            .iter()
-            .zip(primes)
-            .map(|(&e, &p)| i64::from(p) * i64::from(p) * e * e)
-            .sum();
-        (sopfr(interval, primes), squared)
     }
 }
 
@@ -187,6 +117,7 @@ mod tests {
     use crate::Notation;
     use crate::primes::Subgroup;
     use crate::temperament::Temperament;
+    use diophantine::cvp_exact;
 
     /// A notation of the equal temperament of `divisions` over `subgroup`, and
     /// its simplifier.
@@ -279,108 +210,83 @@ mod tests {
             (64, 63)
         );
 
-        // Under the quadratic norm the seed really is the undecimal comma, so
-        // it is the walk that is doing this, not the reduction.
-        let seed = simplifier
-            .simplify_within(
-                &notation.temperament().temper(&stack(&notation, 1)).unwrap(),
-                0,
-            )
-            .unwrap();
-        assert_eq!(notation.subgroup().to_ratio(&seed[0]).unwrap(), (45, 44));
+        // Under the quadratic norm the closest really is the undecimal comma,
+        // so it is the L1 search that is doing this, not the reduction.
+        let tempered = notation.temperament().temper(&stack(&notation, 1)).unwrap();
+        let interval = notation.temperament().preimage(&tempered).unwrap();
+        let weights = notation.subgroup().weights();
+        let closest = cvp_exact(&interval, simplifier.lattice(), &weights).unwrap();
+        let seed = subtract(&interval, &closest);
+        assert_eq!(notation.subgroup().to_ratio(&seed).unwrap(), (45, 44));
     }
 
     #[test]
-    fn a_radius_of_two_is_enough_and_a_radius_of_one_is_not() {
-        // A radius of one settles in a hollow two steps wide. Fifteen octaves
-        // down, 9et reaches 1/39366, of norm 29, by stepping two at once; a
-        // radius of one stops at 1/34560, of norm 30.
-        {
-            let (notation, simplifier) = simplifier(9, "2.3.5.7");
-            let far = notation.temperament().temper(&[-15, 0, 0, 0]).unwrap();
-            let primes = notation.subgroup().basis();
-            let ratio = |interval: &[i64]| notation.subgroup().to_ratio(interval).unwrap();
-            assert_eq!(
-                ratio(&simplifier.simplify_within(&far, 1).unwrap()[0]),
-                (1, 34560)
-            );
-            assert_eq!(
-                ratio(&simplifier.simplify_within(&far, 2).unwrap()[0]),
-                (1, 39366)
-            );
-            assert_eq!(sopfr(&[-8, 3, 1, 0], primes), 30);
-            assert_eq!(sopfr(&[-1, 9, 0, 0], primes), 29);
-        }
+    fn the_hollows_a_local_walk_fell_into() {
+        // The simplifier was once a walk of balls around a seed, and two cases
+        // pinned where it went wrong. Fifteen octaves down, 9et reaches
+        // 1/39366, of norm 29, where a walk one step wide stopped at 1/34560,
+        // of norm 30.
+        let (notation, simplifier) = simplifier(9, "2.3.5.7");
+        let primes = notation.subgroup().basis();
+        let far = notation.temperament().temper(&[-15, 0, 0, 0]).unwrap();
+        let simplest = simplifier.simplify(&far).unwrap();
+        assert_eq!(notation.subgroup().to_ratio(&simplest).unwrap(), (1, 39366));
+        assert_eq!(sopfr(&simplest, primes), 29);
+        assert_eq!(sopfr(&[-8, 3, 1, 0], primes), 30);
 
-        for (divisions, subgroup) in [
-            (15, "2.3.5"),
-            (22, "2.3.5"),
-            (19, "2.3.5.7"),
-            (31, "2.3.5.7"),
-            (41, "2.3.5.7.11"),
-            (72, "2.3.5.7.11"),
-        ] {
-            let (notation, simplifier) = simplifier(divisions, subgroup);
-            assert!(
-                notation.len() > 2,
-                "{divisions}et over {subgroup} has no accidental"
-            );
-            for ups in -30..=60 {
-                let tempered = notation
-                    .temperament()
-                    .temper(&stack(&notation, ups))
-                    .unwrap();
-                assert_eq!(
-                    simplifier.simplify_within(&tempered, 3).unwrap()[0],
-                    simplifier.simplify_within(&tempered, 2).unwrap()[0],
-                    "{divisions}et over {subgroup}, {ups} ups: a wider step moved the answer"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn a_second_round_can_still_improve_on_the_first() {
-        // `search`'s round loop keeps re-centring on the best point found so
-        // far, rather than searching one ball around the seed and stopping -
-        // which is what it could afford to do if the first ball always settled
-        // the question, the way `Notation::spellings`' single ball does.
-        //
-        // Augmented's accidental is a comma that moves quickly along the fifth
-        // chain, so six of them lands somewhere the first ball's local optimum,
-        // `[-31, 24, -3]`, is not the simplest interval: a second, genuinely
-        // improving round - not just the confirming pass after it - trades the
-        // fifth for two more fifths and drops the accidental's prime entirely,
-        // one lighter under sopfr. Stopping after one ball would silently
-        // return the heavier answer instead.
+        // Six of augmented's accidental land where one ball's optimum,
+        // [-31, 24, -3], is not the simplest: trading the fifth for two more
+        // drops the 5 entirely and is one lighter.
         let subgroup: Subgroup = "2.3.5".parse().unwrap();
         let comma = subgroup.factorize(128, 125).unwrap();
         let temperament = Temperament::from_commas(&[comma], &subgroup).unwrap();
         let notation = Notation::from_temperament(&temperament).unwrap();
         let simplifier = Simplifier::new(&temperament).unwrap();
-
-        let stacked = stack(&notation, 6);
-        let all = simplifier
-            .simplifications_interval(&stacked, usize::MAX)
-            .unwrap();
-
+        let simplest = simplifier.simplify_interval(&stack(&notation, 6)).unwrap();
         assert_eq!(
-            subgroup.to_ratio(&all[0]).unwrap(),
+            subgroup.to_ratio(&simplest).unwrap(),
             (282_429_536_481, 274_877_906_944)
         );
+        assert!(sopfr(&simplest, subgroup.basis()) < sopfr(&[-31, 24, -3], subgroup.basis()));
+    }
 
-        // The first ball's own local optimum is still among everything the
-        // walk passed over, but no longer the answer: it ranks behind the
-        // point the second round found.
-        let one_ball = vec![-31i64, 24, -3];
-        let one_ball_rank = all
-            .iter()
-            .position(|candidate| candidate == &one_ball)
-            .expect("the first ball's local optimum is one of the points the walk visited");
-        assert!(
-            one_ball_rank > 0,
-            "the walk should have found something better than the first ball's optimum"
-        );
+    #[test]
+    fn nothing_near_the_simplest_is_simpler() {
+        // Checked independently of the enumeration: every interval within six
+        // commas of the answer along each reduced comma ranks no better.
+        let rank = |interval: &[i64], primes: &[u32]| {
+            let squared: i64 = interval
+                .iter()
+                .zip(primes)
+                .map(|(&e, &p)| i64::from(p * p) * e * e)
+                .sum();
+            (sopfr(interval, primes), squared)
+        };
+        for (divisions, subgroup) in [(22, "2.3.5"), (31, "2.3.5.7"), (41, "2.3.5.7")] {
+            let (notation, simplifier) = simplifier(divisions, subgroup);
+            let primes = notation.subgroup().basis();
+            let lattice = simplifier.lattice();
+            let width = 13i64;
+            for step in 0..divisions {
+                let simplest = simplifier.simplify(&[step]).unwrap();
+                let best = rank(&simplest, primes);
+                for code in 0..width.pow(lattice.len() as u32) {
+                    let mut candidate = simplest.clone();
+                    let mut remaining = code;
+                    for row in lattice {
+                        let times = remaining % width - width / 2;
+                        remaining /= width;
+                        for (c, &r) in candidate.iter_mut().zip(row) {
+                            *c += times * r;
+                        }
+                    }
+                    assert!(
+                        rank(&candidate, primes) >= best,
+                        "{divisions}et over {subgroup}, step {step}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -454,31 +360,19 @@ mod tests {
         );
         let tempered = notation.temperament().temper(&target).unwrap();
         let mut norms = Vec::new();
-        for candidate in simplifier
-            .simplifications_interval(&target, usize::MAX)
-            .unwrap()
-        {
+        for candidate in simplifier.simplifications_interval(&target, 40).unwrap() {
             assert_eq!(notation.temperament().temper(&candidate).unwrap(), tempered);
             norms.push(sopfr(&candidate, subgroup.basis()));
         }
         assert!(norms.windows(2).all(|pair| pair[0] <= pair[1]));
 
-        // The walk sees a few hundred of them, so asking for a handful is free
-        // and asking for more than there are gives what there is.
-        assert_eq!(norms.len(), 625);
-        assert_eq!(
-            simplifier
-                .simplifications_interval(&target, 900)
-                .unwrap()
-                .len(),
-            625
-        );
-        assert_eq!(
+        // Exactly as many as asked for, since the lattice never runs out.
+        assert_eq!(norms.len(), 40);
+        assert!(
             simplifier
                 .simplifications_interval(&target, 0)
                 .unwrap()
-                .len(),
-            0
+                .is_empty()
         );
     }
 

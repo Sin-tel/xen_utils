@@ -16,14 +16,8 @@ fn main() {
     for steps in STEPS {
         let tempered = [steps];
         let cents = 1200.0 * steps as f64 / DIVISIONS as f64;
-        let searched = simplifier
-            .simplifications(&tempered, usize::MAX)
-            .unwrap()
-            .len();
         let written = notation.note(&notation.spell(&tempered).unwrap());
-        println!(
-            "{steps} steps of {DIVISIONS}et, {cents:.1}c, written {written}, {searched} searched"
-        );
+        println!("{steps} steps of {DIVISIONS}et, {cents:.1}c, written {written}");
 
         for candidate in simplifier.simplifications(&tempered, SHOWN).unwrap() {
             let (numerator, denominator) = subgroup.to_ratio(&candidate).unwrap();

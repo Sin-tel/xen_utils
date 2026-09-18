@@ -245,8 +245,24 @@ temperament's comma lattice.
 **Which norm.** Wilson, `sopfr`, the sum of the prime factors of numerator and
 denominator. It is an **L1** norm and the lattice algorithms take a quadratic
 form, so the two disagree: under L2 a step of 41et is `45/44`, under L1 it is
-`64/63`. So `lll` and `cvp_exact` seed the search and a bounded walk finishes it
-under `sopfr`, one ball at a time out to `SEARCH_RADIUS`.
+`64/63`.
+
+**The search is exact.** `sopfr` is L1 with the primes as weights, and the L2
+norm under `diag(p²)` never exceeds it: `sqrt(sum (p e)²) <= sum p |e|`. So
+once some interval of `sopfr` `S` is found, everything at least as simple lies
+in the L2 ball of radius `S`, and a Schnorr–Euchner enumeration of the comma
+lattice that prunes on the current `count`-th best finds the true top `count`.
+That is `diophantine::cvp_l1_top_k`; ties go to the quadratic norm, then to the
+comma. The first leaf is the L2 closest point, so the bound is finite at once,
+and the gap it has to close is at most `sqrt(n)`.
+
+It replaced a walk of balls of `5^rank` points around the L2 seed, repeated
+until nothing improved. That was a local search - 9et once needed two steps at
+once to reach `1/39366` from `1/34560` - and exponential in the lattice's rank:
+11 milliseconds a call at the 19-limit, where the enumeration takes about 10
+microseconds. On 20,674 tempered intervals up to the 19-limit the two agreed on
+every best answer, and the walk's top 8 was worse in 1,046 lists, since it only
+ranked what it happened to pass.
 
 ## Performance
 
@@ -260,8 +276,8 @@ Notation::spellings(4)              3.0 us            3.0 us             3.0 us
 Notation::spell_interval            3.0 us            3.0 us             3.0 us
 Notation::to_interval                38 ns             38 ns              39 ns
 Notation::temper                     34 ns             34 ns              34 ns
-Simplifier::simplify                 54 us             53 us             255 us
-Simplifier::simplifications(8)       52 us             52 us             254 us
+Simplifier::simplify                4.0 us            4.1 us             5.5 us
+Simplifier::simplifications(8)      8.6 us            8.3 us              16 us
 Notation::from_temperament          142 us            504 us             178 us
 ```
 
@@ -272,13 +288,16 @@ redraw - a hundred notes is a third of a millisecond - but not to be called in a
 loop that does not need it. `spellings` costs the same, since the solve and the
 closest vector are most of it.
 
+Simplifying is an enumeration and grows with the lattice's rank and with
+`count`, slowly: about 10 microseconds for the best at the 19-limit.
+
 Building a notation is once per temperament, but `from_temperament` searches
 every subset of the accidentals and scores each, so it grows with them: 72et
 keeps three of three and is the slowest here at half a millisecond.
 
-It was 48 microseconds before two fixes. The first is the one
-`Simplifier::search` needed once: ranking a candidate cloned its coordinates to
-break the tie with. The second was narrowing `RESPELL_WIDTH` from 5 to 2, which
+`spell` was 48 microseconds before two fixes. The first was the one the
+simplifier's old walk had needed too: ranking a candidate cloned its coordinates
+to break the tie with. The second was narrowing `RESPELL_WIDTH` from 5 to 2, which
 is where `spellings` asked for more than one answer spends almost everything -
 that call went from 8.4 microseconds to 1.3.
 
@@ -287,9 +306,9 @@ width 5 and 13% at width 2, so it is gone: most callers want several anyway.
 
 ## Everything here walks a box, and every box needs a reduced basis
 
-`spellings`, `simplify` and the examples all do the same thing - seed a point,
-then walk a bounded box around it under the norm actually wanted - and the
-same two mistakes were made in each.
+`spellings` and the examples do the same thing - seed a point, then walk a
+bounded box around it under the norm actually wanted - as `simplify` did until it
+became an exact enumeration, and the same two mistakes were made in each.
 
 **Reduce the basis first, against the form the search measures with.**
 Unreduced, 41et's enharmonics come back as "the octave is 41 ups" and "the fifth
@@ -326,13 +345,10 @@ away from `225/224`.
   earlier answer and has no weight in it, but it reads only the primes. An
   interval such as `7/5` could be off its nominal in a notation that keeps every
   prime on its own.
-- **The simplifier is a local search, not a proof.** `SEARCH_RADIUS` is 2, and
-  the note on it records that a radius of 2 walks as far as a radius of 3 for
-  every interval within nineteen generators of the unison. A radius of 1 is
-  provably not enough: `a_radius_of_two_is_enough_and_a_radius_of_one_is_not`
-  pins the case, 9et reaching `1/39366` of norm 29 where a radius of 1 stops at
-  `1/34560` of norm 30.
-- **`spellings` is a bounded search too.** The seed is an exact closest vector,
+- **The simplifier ranks only what it is asked for.** `simplifications` is an
+  exact top `count`, so the search closes only once it holds `count` intervals:
+  asking for all of them, say `usize::MAX`, never returns.
+- **`spellings` is a bounded search.** The seed is an exact closest vector,
   so the walk only corrects for the quadratic form standing in for
   `spelling_cost`. `cargo run --release --example spellings_width` measures how
   far that correction reaches, against a much wider walk, over every notation
@@ -389,8 +405,8 @@ away from `225/224`.
   `spelling_cost`, the degree map, and the derivation of a single accidental.
 - `notation_options.rs` - `Notation::options` and `with_count`: the subset
   search and its ranking. Tested through `options`.
-- `simplify.rs` - `Simplifier`: the comma lattice reduced once, then a seeded
-  walk per interval.
+- `simplify.rs` - `Simplifier`: the comma lattice reduced once, then an exact
+  weighted L1 enumeration per tempered interval.
 - `temperament.rs`, `primes.rs`, `util.rs` - the temperament, the subgroup, and
   integer vector helpers with no music in them.
 
