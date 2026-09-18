@@ -103,8 +103,7 @@ pitch fixes it once the rest is chosen.
 
 ## The search: which accidentals to keep
 
-That is all `Search` decides, and it is the only thing nothing downstream can do:
-it picks the generators, hence the enharmonics, hence the notation.
+That is all `NotationOptions` decides.
 
 Each accidental falls into one of four classes:
 
@@ -156,7 +155,7 @@ the price of moving a prime onto another letter.
 one of another kind, so `[3]` is the one wanted.
 
 **Sharps and flats do not count**, since seven fifths leave the letter alone.
-Flattone writes `11/8` as `F#5` where just intonation has `^F5`, and that is
+Flattone writes `11/8` as `F#5` where just intonation has `tF5`, and that is
 still an `F`, so there is no reason to take on an accidental for 11.
 
 Where nothing qualifies the recommendation falls back to the first notation.
@@ -293,7 +292,7 @@ away from `225/224`.
 - `notation.rs` - the `Notation` type: `generators`, `pitch`, `enharmonics`,
   `spell`, `respell`, `note`, the ranking `spelling_cost`, and the derivation of a
   single accidental.
-- `search.rs` - `Notation::options`, and only the choice of which accidentals to
+- `notation_options.rs` - `Notation::options`, and only the choice of which accidentals to
   keep. Tested through `options`.
 - `simplify.rs` - `Simplifier`: the comma lattice reduced once, then a seeded
   walk per interval.
