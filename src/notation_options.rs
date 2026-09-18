@@ -20,7 +20,7 @@ impl<'a> NotationOptions<'a> {
         accidentals: &[Accidental],
     ) -> Result<Self, Error> {
         let vectors: Matrix<i64> = accidentals.iter().map(|a| a.vector.clone()).collect();
-        let images = temperament.map_all(&vectors)?;
+        let images = temperament.temper_all(&vectors)?;
         let mut useful: Vec<usize> = Vec::new();
         for index in 0..images.len() {
             if is_zero(&images[index]) {
@@ -77,7 +77,10 @@ impl<'a> NotationOptions<'a> {
             if !self.valid(&subset)? {
                 continue;
             }
-            let kept: Vec<Accidental> = subset.iter().map(|&i| self.accidentals[i].clone()).collect();
+            let kept: Vec<Accidental> = subset
+                .iter()
+                .map(|&i| self.accidentals[i].clone())
+                .collect();
             let notation = Notation::from_accidentals(self.temperament, &kept)?;
             let score = Score::of(&notation)?;
             if best.as_ref().is_none_or(|(held, _)| score < *held) {
@@ -89,7 +92,8 @@ impl<'a> NotationOptions<'a> {
 
     /// Whether the accidentals at `keep` make a notation at all.
     ///
-    /// They must reach every pitch together with the octave and the fifth. An
+    /// They must reach every tempered interval together with the octave and the
+    /// fifth. An
     /// equal temperament must also keep one worth a single step if it keeps any:
     /// with no symbol for a single step, single steps can only be reached by
     /// walking the fifth chain, which is not how anyone writes one.
@@ -102,11 +106,11 @@ impl<'a> NotationOptions<'a> {
         }
         let mut generators = fifth_chain(self.temperament.dim());
         generators.extend(keep.iter().map(|&i| self.accidentals[i].vector.clone()));
-        let images = self.temperament.map_all(&generators)?;
+        let images = self.temperament.temper_all(&generators)?;
         Ok(spans(&images, self.temperament.rank()))
     }
 
-    /// Why no subset of the accidentals reaches every pitch.
+    /// Why no subset of the accidentals reaches every tempered interval.
     fn nothing_spans(&self) -> Error {
         let subgroup = self.temperament.subgroup();
         if self.temperament.rank() == 1 {
@@ -115,7 +119,7 @@ impl<'a> NotationOptions<'a> {
             ));
         }
         Error::Unsupported(format!(
-            "the octave, the fifth and the accidentals of {subgroup} do not reach every pitch of this rank {} temperament",
+            "the octave, the fifth and the accidentals of {subgroup} do not reach every tempered interval of this rank {} temperament",
             self.temperament.rank()
         ))
     }
@@ -140,7 +144,11 @@ impl Score {
         Ok(Score {
             failures: verdict.failures,
             total: verdict.costs.iter().copied().sum::<Option<i64>>(),
-            costs: verdict.costs.iter().map(|c| c.unwrap_or(i64::MAX)).collect(),
+            costs: verdict
+                .costs
+                .iter()
+                .map(|c| c.unwrap_or(i64::MAX))
+                .collect(),
         })
     }
 }

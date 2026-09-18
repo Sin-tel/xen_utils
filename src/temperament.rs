@@ -16,8 +16,9 @@ use crate::util::{column, first_column};
 /// normal form. Two mapping matrices describe the same temperament exactly
 /// when they have the same HNF.
 ///
-/// A mapping that is not already saturated is refused, since it does not
-/// describe a valid temperament.
+/// A mapping whose row lattice is not primitive is refused, since it does not
+/// describe a valid temperament: the rows must span a primitive sublattice of
+/// the dual space, one equal to its own saturation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Temperament {
     mapping: Matrix<i64>,
@@ -32,8 +33,8 @@ impl Temperament {
     /// depend on which basis of generators the input used.
     ///
     /// # Errors
-    /// Returns [`Error::Unsupported`] if the mapping is contorted, i.e. its
-    /// row lattice is not already saturated. Saturating it would silently
+    /// Returns [`Error::Unsupported`] if the mapping's row lattice is not
+    /// primitive, i.e. not equal to its saturation. Saturating it would silently
     /// answer for a different temperament than the one asked for; see the
     /// type documentation.
     pub fn from_mapping(mapping: &Matrix<i64>, subgroup: &Subgroup) -> Result<Self, Error> {
@@ -47,11 +48,11 @@ impl Temperament {
             )));
         }
 
-        // The lattice is saturated when saturating it changes nothing.
+        // The lattice is primitive when saturating it changes nothing.
         let canonical = hnf(mapping)?;
         if saturation(mapping)? != canonical {
             return Err(Error::Unsupported(format!(
-                "mapping over {subgroup} is contorted, and would saturate to a different temperament"
+                "mapping over {subgroup} is not primitive, and would saturate to a different temperament"
             )));
         }
 
@@ -160,16 +161,20 @@ impl Temperament {
     /// # Errors
     /// Returns [`Error::InvalidDimensions`] if any of them does not have one
     /// entry per basis element of the subgroup.
-    pub fn map_all(&self, intervals: &Matrix<i64>) -> Result<Matrix<i64>, Error> {
+    pub fn temper_all(&self, intervals: &Matrix<i64>) -> Result<Matrix<i64>, Error> {
         intervals
             .iter()
-            .map(|interval| self.map(interval))
+            .map(|interval| self.temper(interval))
             .collect()
     }
 
-    /// Applies the mapping to an interval, returning its tempered representation
-    /// as a vector of generator counts.
-    pub fn map(&self, interval: &[i64]) -> Result<Vec<i64>, Error> {
+    /// The tempered interval a just interval maps to: how many of each
+    /// generator it is.
+    ///
+    /// # Errors
+    /// Returns [`Error::InvalidDimensions`] if `interval` does not have one
+    /// entry per basis element of the subgroup.
+    pub fn temper(&self, interval: &[i64]) -> Result<Vec<i64>, Error> {
         if interval.len() != self.dim() {
             return Err(Error::InvalidDimensions(format!(
                 "interval has {} entries, expected {}",
@@ -184,17 +189,22 @@ impl Temperament {
             .collect())
     }
 
-    /// Return a representative just interval that maps to the given tempered interval.
-    /// This gives just one possibility out of many.
-    pub fn map_inverse(&self, interval: &[i64]) -> Result<Vec<i64>, Error> {
-        if interval.len() != self.rank() {
+    /// Some just interval that tempers to `tempered`: an arbitrary one of the
+    /// many, not simplified. [`Simplifier`](crate::Simplifier) finds the
+    /// simplest.
+    ///
+    /// # Errors
+    /// Returns [`Error::InvalidDimensions`] if `tempered` does not have one
+    /// entry per generator.
+    pub fn preimage(&self, tempered: &[i64]) -> Result<Vec<i64>, Error> {
+        if tempered.len() != self.rank() {
             return Err(Error::InvalidDimensions(format!(
-                "interval has {} entries, expected {}",
-                interval.len(),
+                "tempered interval has {} entries, expected {}",
+                tempered.len(),
                 self.rank()
             )));
         }
-        let solution = solve_diophantine(&self.mapping, &column(interval))?;
+        let solution = solve_diophantine(&self.mapping, &column(tempered))?;
         Ok(first_column(&solution))
     }
 }
@@ -248,7 +258,7 @@ mod tests {
         assert_eq!(commas.len(), 2);
         for comma in &commas {
             // Every returned comma is tempered out, and is an ascending interval.
-            assert_eq!(t.map(comma).unwrap(), vec![0]);
+            assert_eq!(t.temper(comma).unwrap(), vec![0]);
             assert!(s.to_cents(comma) > 0.0);
             // Reduction should find commas far smaller than an octave.
             assert!(s.to_cents(comma) < 100.0);
@@ -282,7 +292,7 @@ mod tests {
         // Tempering out 81/80 leaves rank 2 meantone.
         let t = Temperament::from_commas(&[vec![-4, 4, -1]], &s).unwrap();
         assert_eq!(t.rank(), 2);
-        assert_eq!(t.map(&[-4, 4, -1]).unwrap(), vec![0, 0]);
+        assert_eq!(t.temper(&[-4, 4, -1]).unwrap(), vec![0, 0]);
     }
 
     #[test]
@@ -297,18 +307,18 @@ mod tests {
     }
 
     #[test]
-    fn a_contorted_mapping_is_refused() {
+    fn a_mapping_that_is_not_primitive_is_refused() {
         // Every row is even, so the map only ever reaches even numbers: it is
         // not surjective onto its own image and describes no single
         // temperament. from_commas never produces this, since a kernel is
-        // always saturated - only from_mapping and et need the check.
+        // always primitive - only from_mapping and et need the check.
         let s = Subgroup::p_limit(5);
         assert!(Temperament::from_mapping(&vec![vec![2, 0, 2], vec![0, 2, 2]], &s).is_err());
 
         // 24et over 2.3.5 is the musical case: both primes land on twice an
         // odd number, so it saturates to 12et rather than describing itself.
         // 24et over 2.3.5.11 is what to ask for instead - its quartertone
-        // breaks the contorsion.
+        // makes the mapping primitive.
         assert!(Temperament::equal(24, &s).is_err());
         assert!(Temperament::equal(24, &"2.3.5.11".parse().unwrap()).is_ok());
     }

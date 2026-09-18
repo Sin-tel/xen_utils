@@ -1,10 +1,6 @@
-//! How wide `respell` has to walk: its answers at widths 0, 1 and 2 against a
-//! much wider walk, over every notation of every temperament in the data files
-//! and every equal temperament up to 72 over a few subgroups.
-//!
-//! Each pitch is respelled from its best spelling, and again from that
-//! spelling pushed far along the enharmonics, since `respell` may be handed
-//! any spelling at all.
+//! How wide `spellings` has to walk: its answers at widths 0, 1 and 2 against
+//! a much wider walk, over every notation of every temperament in the data
+//! files and every equal temperament up to 72 over a few subgroups.
 
 use std::error::Error;
 
@@ -62,7 +58,7 @@ fn main() {
         }
     }
 
-    println!("\n{} respell calls", tally.calls);
+    println!("\n{} spellings calls", tally.calls);
     println!("reference moved when widened: {}", tally.reference_moved);
     for (w, width) in WIDTHS.iter().enumerate() {
         let counts: Vec<String> = COUNTS
@@ -103,61 +99,45 @@ fn sweep(name: &str, t: &Temperament, tally: &mut Tally) {
         let reference = reference_width(lattice.len());
 
         for interval in intervals(n.dim()) {
-            let Ok(best) = n.spell(&interval) else {
-                continue;
-            };
-            // A far seed: the best spelling pushed a long way along every
-            // enharmonic, by different amounts.
-            let far: Vec<i64> = (0..n.rank())
-                .map(|slot| {
-                    best[slot]
-                        + lattice
-                            .iter()
-                            .enumerate()
-                            .map(|(k, row)| (7 - 3 * k as i64) * row[slot])
-                            .sum::<i64>()
-                })
-                .collect();
+            let tempered = t.temper(&interval).unwrap();
+            tally.calls += 1;
+            let wanted = n.spellings_within(&tempered, max_count, reference).unwrap();
 
-            for seed in [best, far] {
-                tally.calls += 1;
-                let wanted = n.respell_within(&seed, max_count, reference).unwrap();
-
-                // Is the reference itself settled? Only where it is cheap to check.
-                if lattice.len() <= 3 {
-                    let wider = n.respell_within(&seed, max_count, reference + 1).unwrap();
-                    if wider != wanted {
-                        tally.reference_moved += 1;
-                    }
+            // Is the reference itself settled? Only where it is cheap to check.
+            if lattice.len() <= 3 {
+                let wider = n
+                    .spellings_within(&tempered, max_count, reference + 1)
+                    .unwrap();
+                if wider != wanted {
+                    tally.reference_moved += 1;
                 }
+            }
 
-                for (w, &width) in WIDTHS.iter().enumerate() {
-                    if width >= reference {
-                        tally.skipped[w] += 1;
-                        continue;
-                    }
-                    let got = n.respell_within(&seed, max_count, width).unwrap();
-                    for (c, &count) in COUNTS.iter().enumerate() {
-                        let upto = count.min(wanted.len());
-                        if got.len() < upto || got[..upto] != wanted[..upto] {
-                            tally.differ[w][c] += 1;
-                            if tally.shown[w][c] < SHOWN {
-                                tally.shown[w][c] += 1;
-                                let show = |list: &[Vec<i64>]| {
-                                    list.iter()
-                                        .take(count)
-                                        .map(|c| n.note(c))
-                                        .collect::<Vec<_>>()
-                                        .join(" ")
-                                };
-                                println!(
-                                    "width {width} top {count}: {name} [{}] option {index}, seed {}: got [{}] wanted [{}]",
-                                    n.rank(),
-                                    n.note(&seed),
-                                    show(&got),
-                                    show(&wanted)
-                                );
-                            }
+            for (w, &width) in WIDTHS.iter().enumerate() {
+                if width >= reference {
+                    tally.skipped[w] += 1;
+                    continue;
+                }
+                let got = n.spellings_within(&tempered, max_count, width).unwrap();
+                for (c, &count) in COUNTS.iter().enumerate() {
+                    let upto = count.min(wanted.len());
+                    if got.len() < upto || got[..upto] != wanted[..upto] {
+                        tally.differ[w][c] += 1;
+                        if tally.shown[w][c] < SHOWN {
+                            tally.shown[w][c] += 1;
+                            let show = |list: &[Vec<i64>]| {
+                                list.iter()
+                                    .take(count)
+                                    .map(|c| n.note(c))
+                                    .collect::<Vec<_>>()
+                                    .join(" ")
+                            };
+                            println!(
+                                "width {width} top {count}: {name} [{}] option {index}, {tempered:?}: got [{}] wanted [{}]",
+                                n.len(),
+                                show(&got),
+                                show(&wanted)
+                            );
                         }
                     }
                 }

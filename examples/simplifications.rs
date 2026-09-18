@@ -1,4 +1,5 @@
-//! The candidate just intervals of a pitch in an equal temperament.
+//! The simplest just intervals of a few tempered intervals of an equal
+//! temperament.
 
 use xen_utils::{Notation, Simplifier, Subgroup, Temperament, simplify::sopfr};
 
@@ -13,26 +14,24 @@ fn main() {
     let simplifier = Simplifier::new(&temperament).unwrap();
 
     for steps in STEPS {
-        // The stack of ups that reaches this step, which is the awkward
-        // spelling the simplifier is being asked to improve on.
-        let mut spelling = vec![0; notation.rank()];
-        spelling[2] = steps;
-        let stacked = notation.to_just(&spelling).unwrap();
-
-        let tempered = 1200.0 * steps as f64 / DIVISIONS as f64;
-        let searched = simplifier.candidates(&stacked, usize::MAX).unwrap().len();
-        let written = notation.note(&notation.spell(&stacked).unwrap());
+        let tempered = [steps];
+        let cents = 1200.0 * steps as f64 / DIVISIONS as f64;
+        let searched = simplifier
+            .simplifications(&tempered, usize::MAX)
+            .unwrap()
+            .len();
+        let written = notation.note(&notation.spell(&tempered).unwrap());
         println!(
-            "{steps} steps of {DIVISIONS}et, {tempered:.1}c, written {written}, {searched} searched"
+            "{steps} steps of {DIVISIONS}et, {cents:.1}c, written {written}, {searched} searched"
         );
 
-        for candidate in simplifier.candidates(&stacked, SHOWN).unwrap() {
+        for candidate in simplifier.simplifications(&tempered, SHOWN).unwrap() {
             let (numerator, denominator) = subgroup.to_ratio(&candidate).unwrap();
             println!(
                 "    {:>7}  norm {:3}  {:+6.1}c",
                 format!("{numerator}/{denominator}"),
                 sopfr(&candidate, subgroup.basis()),
-                subgroup.to_cents(&candidate) - tempered,
+                subgroup.to_cents(&candidate) - cents,
             );
         }
         println!();

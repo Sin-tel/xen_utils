@@ -79,7 +79,7 @@ impl Notation {
     /// for every prime beyond 3.
     ///
     /// Spelling is a bijection here: nothing is tempered out, so no two written
-    /// notes are one pitch and there are no enharmonics.
+    /// spellings temper to the same thing and there are no enharmonics.
     ///
     /// # Errors
     /// Returns [`Error::Unsupported`] if some prime has no accidental.
@@ -121,8 +121,8 @@ impl Notation {
     /// Every subset of the accidentals is a candidate. An accidental tempered
     /// out is never kept, nor one worth what an earlier accidental is worth,
     /// up to direction: in 41et `64/63` is worth what `81/80` is. A subset
-    /// must reach every pitch, and an equal temperament keeping any accidental
-    /// must keep one worth a single step.
+    /// must reach every tempered interval, and an equal temperament keeping any
+    /// accidental must keep one worth a single step.
     ///
     /// Of each size the best is the one with fewest primes off their nominals
     /// (see [`keeps_nominals`](Self::keeps_nominals)), then the lowest total
@@ -168,8 +168,8 @@ impl Notation {
     /// # Errors
     /// Returns [`Error::InvalidDimensions`] if an accidental is not an interval
     /// of the temperament's subgroup, and [`Error::Unsupported`] if two
-    /// symbols collide, or if the generators do not reach every pitch of the
-    /// temperament.
+    /// symbols collide, or if the generators do not reach every tempered
+    /// interval.
     pub(crate) fn from_accidentals(
         temperament: &Temperament,
         accidentals: &[Accidental],
@@ -179,10 +179,10 @@ impl Notation {
 
         let mut generators = fifth_chain(subgroup.dim());
         generators.extend(accidentals.iter().map(|a| a.vector.clone()));
-        let images = temperament.map_all(&generators)?;
+        let images = temperament.temper_all(&generators)?;
         if !spans(&images, temperament.rank()) {
             return Err(Error::Unsupported(format!(
-                "the octave, the fifth and these accidentals of {subgroup} do not reach every pitch of this rank {} temperament",
+                "the octave, the fifth and these accidentals of {subgroup} do not reach every tempered interval of this rank {} temperament",
                 temperament.rank()
             )));
         }
@@ -232,76 +232,109 @@ impl Notation {
         self.temperament.subgroup()
     }
 
-    /// The number of notation coordinates.
-    pub fn rank(&self) -> usize {
+    /// The number of notation coordinates: the octave, the fifth, then one per
+    /// accidental. The length of a spelling.
+    // A notation always has at least the octave and the fifth.
+    #[allow(clippy::len_without_is_empty)]
+    pub fn len(&self) -> usize {
         self.generators.len()
     }
 
-    /// The dimension of the subgroup being notated, i.e. the length of the interval
-    /// vectors this notation spells.
+    /// The dimension of the subgroup being notated: the length of a just
+    /// interval.
     pub fn dim(&self) -> usize {
         self.subgroup().dim()
     }
 
-    /// Maps notation coordinates to a pitch in the temperament.
+    /// The tempered interval a spelling stands for.
     ///
     /// # Errors
-    /// Returns [`Error::InvalidDimensions`] if `coordinates` does not have one
+    /// Returns [`Error::InvalidDimensions`] if `spelling` does not have one
     /// entry per notation coordinate.
-    pub fn pitch(&self, coordinates: &[i64]) -> Result<Vec<i64>, Error> {
-        self.check(coordinates)?;
-        Ok(combination(
-            coordinates,
-            &self.images,
-            self.temperament.rank(),
-        ))
+    pub fn temper(&self, spelling: &[i64]) -> Result<Vec<i64>, Error> {
+        self.check(spelling)?;
+        Ok(combination(spelling, &self.images, self.temperament.rank()))
     }
 
-    /// The simplest way to write a just interval.
+    /// The just interval a spelling reads as, taking each accidental as the
+    /// interval it is named for.
+    ///
+    /// This is the spelling's literal reading, one of the many just intervals
+    /// that temper to the same thing. [`Simplifier`](crate::Simplifier) finds
+    /// the simplest.
+    ///
+    /// # Errors
+    /// Returns [`Error::InvalidDimensions`] if `spelling` does not have one
+    /// entry per notation coordinate.
+    pub fn to_interval(&self, spelling: &[i64]) -> Result<Vec<i64>, Error> {
+        self.check(spelling)?;
+        Ok(combination(spelling, &self.generators, self.dim()))
+    }
+
+    /// The best way to write a tempered interval.
+    ///
+    /// # Errors
+    /// Returns [`Error::InvalidDimensions`] if `tempered` does not have one
+    /// entry per generator of the temperament, and [`Error::Unsupported`] if
+    /// the notation cannot write it.
+    pub fn spell(&self, tempered: &[i64]) -> Result<Vec<i64>, Error> {
+        Ok(self.spellings(tempered, 1)?.swap_remove(0))
+    }
+
+    /// [`spell`](Self::spell) the tempered interval a just interval maps to.
     ///
     /// # Errors
     /// Returns [`Error::InvalidDimensions`] if `interval` does not have one
     /// entry per basis element of the subgroup, and [`Error::Unsupported`] if
-    /// the temperament puts it out of the notation's reach.
-    pub fn spell(&self, interval: &[i64]) -> Result<Vec<i64>, Error> {
-        if interval.len() != self.dim() {
-            return Err(Error::InvalidDimensions(format!(
-                "interval has {} entries, expected {}",
-                interval.len(),
-                self.dim()
-            )));
-        }
-        let target = self.temperament.map(interval)?;
-        let solution = solve_diophantine(&transpose(&self.images), &column(&target))
-            .map_err(|_| Error::Unsupported(format!("{interval:?} cannot be written")))?;
-        let seed = first_column(&solution);
-        Ok(self
-            .respell(&seed, 1)?
-            .pop()
-            .expect("respell always returns at least the note it was given"))
+    /// the notation cannot write it.
+    pub fn spell_interval(&self, interval: &[i64]) -> Result<Vec<i64>, Error> {
+        self.spell(&self.temperament.temper(interval)?)
     }
 
-    /// Returns a list of `count` different ways to write the same pitch.
-    /// Sorted by simplicity, best first.
+    /// The `count` best ways to write a tempered interval, best first.
     ///
     /// # Errors
-    /// Returns [`Error::InvalidDimensions`] if `coordinates` does not have one
-    /// entry per notation coordinate.
-    pub fn respell(&self, coordinates: &[i64], count: usize) -> Result<Vec<Vec<i64>>, Error> {
-        self.respell_within(coordinates, count, RESPELL_WIDTH)
+    /// Returns [`Error::InvalidDimensions`] if `tempered` does not have one
+    /// entry per generator of the temperament, and [`Error::Unsupported`] if
+    /// the notation cannot write it.
+    pub fn spellings(&self, tempered: &[i64], count: usize) -> Result<Vec<Vec<i64>>, Error> {
+        self.spellings_within(tempered, count, RESPELL_WIDTH)
     }
 
-    /// [`respell`](Self::respell), walking `width` enharmonics either way.
-    #[doc(hidden)]
-    pub fn respell_within(
+    /// [`spellings`](Self::spellings) of the tempered interval a just interval
+    /// maps to.
+    ///
+    /// # Errors
+    /// Returns [`Error::InvalidDimensions`] if `interval` does not have one
+    /// entry per basis element of the subgroup, and [`Error::Unsupported`] if
+    /// the notation cannot write it.
+    pub fn spellings_interval(
         &self,
-        coordinates: &[i64],
+        interval: &[i64],
+        count: usize,
+    ) -> Result<Vec<Vec<i64>>, Error> {
+        self.spellings(&self.temperament.temper(interval)?, count)
+    }
+
+    /// [`spellings`](Self::spellings), walking `width` enharmonics either way.
+    #[doc(hidden)]
+    pub fn spellings_within(
+        &self,
+        tempered: &[i64],
         count: usize,
         width: i64,
     ) -> Result<Vec<Vec<i64>>, Error> {
-        self.check(coordinates)?;
+        let rank = self.temperament.rank();
+        if tempered.len() != rank {
+            return Err(Error::InvalidDimensions(format!(
+                "tempered interval has {} entries, expected {rank}",
+                tempered.len()
+            )));
+        }
+        let solution = solve_diophantine(&transpose(&self.images), &column(tempered))
+            .map_err(|_| Error::Unsupported(format!("{tempered:?} cannot be written")))?;
         Ok(cheapest(
-            coordinates,
+            &first_column(&solution),
             &self.enharmonics,
             &self.weights,
             width,
@@ -310,8 +343,8 @@ impl Notation {
     }
 
     /// The cheapest way to write each prime beyond 3 on its just nominal: at
-    /// the degree just intonation gives it, or `None` where no spelling of its
-    /// pitch has that degree.
+    /// the degree just intonation gives it, or `None` where no spelling of the
+    /// tempered prime has that degree.
     ///
     /// The degree is exact rather than modulo the seven nominals: a note ten
     /// sharps up an octave lower is not on the nominal, though its letter is.
@@ -324,7 +357,7 @@ impl Notation {
     /// Returns [`Error::Unsupported`] if some prime has no accidental.
     pub fn nominal_spellings(&self) -> Result<Vec<Option<Vec<i64>>>, Error> {
         // The notation coordinates and their degree side by side, so that one
-        // solve finds a spelling of the right pitch at the right degree.
+        // solve finds a spelling of the right tempered interval at the right degree.
         let with_degree: Matrix<i64> = self
             .images
             .iter()
@@ -343,7 +376,7 @@ impl Notation {
         for (index, nominal) in (2..self.dim()).zip(just_nominals(self.subgroup())?) {
             let mut prime = vec![0i64; self.dim()];
             prime[index] = 1;
-            let mut target = self.temperament.map(&prime)?;
+            let mut target = self.temperament.temper(&prime)?;
             target.push(nominal.degree);
             let spelling = solve_diophantine(&transpose(&with_degree), &column(&target))
                 .ok()
@@ -387,7 +420,7 @@ impl Notation {
         for ((index, cost), nominal) in (2..self.dim()).zip(&costs).zip(nominals) {
             let mut prime = vec![0i64; self.dim()];
             prime[index] = 1;
-            let best = spelling_cost(&self.spell(&prime)?);
+            let best = spelling_cost(&self.spell_interval(&prime)?);
             if cost.is_none_or(|cost| cost > best.max(nominal.cost)) {
                 failures += 1;
             }
@@ -395,52 +428,39 @@ impl Notation {
         Ok(NominalVerdict { costs, failures })
     }
 
-    /// Converts notation coordinates back to just interval.
-    ///
-    /// This gives one just interval of the many the pitch could be interpreted as.
-    /// Query [`Simplifier`](crate::Simplifier) to find simpler ones.
-    ///
-    /// # Errors
-    /// Returns [`Error::InvalidDimensions`] if `coordinates` does not have one
-    /// entry per notation coordinate.
-    pub fn to_just(&self, coordinates: &[i64]) -> Result<Vec<i64>, Error> {
-        self.check(coordinates)?;
-        Ok(combination(coordinates, &self.generators, self.dim()))
-    }
-
-    /// Checks that `coordinates` has one entry per notation coordinate.
-    fn check(&self, coordinates: &[i64]) -> Result<(), Error> {
-        if coordinates.len() != self.rank() {
+    /// Checks that `spelling` has one entry per notation coordinate.
+    fn check(&self, spelling: &[i64]) -> Result<(), Error> {
+        if spelling.len() != self.len() {
             return Err(Error::InvalidDimensions(format!(
-                "interval has {} entries, expected {}",
-                coordinates.len(),
-                self.rank()
+                "spelling has {} entries, expected {}",
+                spelling.len(),
+                self.len()
             )));
         }
         Ok(())
     }
 
-    /// Writes notation coordinates as a note in scientific pitch notation,
-    /// such as `C5`, `Eb4`, `vE5`.
+    /// Writes a spelling as a note in scientific pitch notation, such as `C5`,
+    /// `Eb4`, `vE5`.
     ///
-    /// The coordinates are read as an interval up from `C5`, so `(0, 0, ..)`
-    /// is `C5` itself and `(0, 1, 0, ..)`, a fifth up, is `G5`. Accidentals
-    /// come before the nominal and sharps and flats after it. The symbols are
+    /// The spelling is read as an interval up from `C5`, so `(0, 0, ..)` is
+    /// `C5` itself and `(0, 1, 0, ..)`, a fifth up, is `G5`. Accidentals come
+    /// before the nominal and sharps and flats after it. The symbols are
     /// placeholders for debugging, since real microtonal accidentals are not in
-    /// unicode; see [`accidental_symbol`] for how one is picked.
+    /// unicode.
     ///
     /// # Panics
-    /// Panics if `interval` does not have one entry per notation coordinate.
-    pub fn note(&self, interval: &[i64]) -> String {
+    /// Panics if `spelling` does not have one entry per notation coordinate.
+    pub fn note(&self, spelling: &[i64]) -> String {
         assert_eq!(
-            interval.len(),
-            self.rank(),
-            "interval must have one entry per notation coordinate"
+            spelling.len(),
+            self.len(),
+            "spelling must have one entry per notation coordinate"
         );
-        let (octaves, fifths) = (interval[0], interval[1]);
+        let (octaves, fifths) = (spelling[0], spelling[1]);
 
         let mut name = String::new();
-        for (&count, (up, down)) in interval[2..].iter().zip(&self.accidentals) {
+        for (&count, (up, down)) in spelling[2..].iter().zip(&self.accidentals) {
             let symbol = if count < 0 { down } else { up };
             name.extend(std::iter::repeat_n(symbol, count.unsigned_abs() as usize));
         }
@@ -622,7 +642,7 @@ pub(crate) fn derive_accidental_vector(
 /// middle of them.
 const NOMINAL_CENTRE: i64 = 2;
 
-/// How far Notation::respell searches for.
+/// How far [`Notation::spellings`] walks along each enharmonic, either way.
 const RESPELL_WIDTH: i64 = 2;
 
 /// A sharp is worth two accidental marks.
@@ -706,8 +726,8 @@ fn spelling_break_ties(coordinates: &[i64]) -> i64 {
     (coordinates[1] - NOMINAL_CENTRE).abs()
 }
 
-/// Whether generators with these `images` reach every pitch of a rank `rank`
-/// temperament. Where they do not, some pitch cannot be written at all.
+/// Whether generators with these `images` reach every tempered interval of a
+/// rank `rank` temperament. Where they do not, some cannot be written at all.
 pub(crate) fn spans(images: &Matrix<i64>, rank: usize) -> bool {
     let identity: Matrix<i64> = eye(rank);
     solve_diophantine(&transpose(images), &identity).is_ok()
@@ -772,7 +792,7 @@ mod tests {
 
     /// The ranks of a run of notations.
     fn ranks(options: &[Notation]) -> Vec<usize> {
-        options.iter().map(Notation::rank).collect()
+        options.iter().map(Notation::len).collect()
     }
 
     /// The accidentals of a notation, as ratios.
@@ -786,16 +806,16 @@ mod tests {
     /// The note name of a ratio, read as an interval up from C5.
     fn note_of(n: &Notation, num: u64, den: u64) -> String {
         let interval = n.subgroup().factorize(num, den).unwrap();
-        n.note(&n.spell(&interval).unwrap())
+        n.note(&n.spell_interval(&interval).unwrap())
     }
 
     #[test]
     fn pythagorean_mapping() {
         let n = notation("2.3");
         // 2/1 is an octave and 3/1 is an octave plus a fifth.
-        assert_eq!(n.spell(&[1, 0]).unwrap(), vec![1, 0]);
-        assert_eq!(n.spell(&[0, 1]).unwrap(), vec![1, 1]);
-        assert_eq!(n.rank(), 2);
+        assert_eq!(n.spell_interval(&[1, 0]).unwrap(), vec![1, 0]);
+        assert_eq!(n.spell_interval(&[0, 1]).unwrap(), vec![1, 1]);
+        assert_eq!(n.len(), 2);
         assert_eq!(n.dim(), 2);
         assert!(accidental_ratios(&n).is_empty());
     }
@@ -805,9 +825,9 @@ mod tests {
         for subgroup in ["2.3", "2.3.5", "2.3.7", "2.3.11", "2.3.5.7.11"] {
             let n = notation(subgroup);
             for (index, generator) in n.generators().iter().enumerate() {
-                let mut unit = vec![0; n.rank()];
+                let mut unit = vec![0; n.len()];
                 unit[index] = 1;
-                assert_eq!(n.spell(generator).unwrap(), unit);
+                assert_eq!(n.spell_interval(generator).unwrap(), unit);
             }
         }
     }
@@ -825,7 +845,7 @@ mod tests {
     fn five_limit_mapping() {
         let n = notation("2.3.5");
         // 5 is four fifths up, lowered by a syntonic comma.
-        assert_eq!(n.spell(&[0, 0, 1]).unwrap(), vec![0, 4, -1]);
+        assert_eq!(n.spell_interval(&[0, 0, 1]).unwrap(), vec![0, 4, -1]);
         assert_eq!(
             n.generators(),
             &vec![vec![1, 0, 0], vec![-1, 1, 0], vec![-4, 4, -1]]
@@ -835,8 +855,8 @@ mod tests {
     #[test]
     fn spelling_checks_dimensions() {
         let n = notation("2.3");
-        assert!(n.spell(&[1, 0, 0]).is_err());
-        assert!(n.spell(&[1]).is_err());
+        assert!(n.spell_interval(&[1, 0, 0]).is_err());
+        assert!(n.spell_interval(&[1]).is_err());
     }
 
     #[test]
@@ -916,11 +936,11 @@ mod tests {
         let pythagorean = notation("2.3");
         for (subgroup, comma) in [("2.3.5", (81, 80)), ("2.3.7", (64, 63))] {
             let n = tempered(subgroup, &[comma]);
-            assert_eq!(n.rank(), 2);
+            assert_eq!(n.len(), 2);
             assert!(accidental_ratios(&n).is_empty());
             // The comma is a unison, so it is written as one.
             let comma = n.subgroup().factorize(comma.0, comma.1).unwrap();
-            assert_eq!(n.spell(&comma).unwrap(), vec![0; n.rank()]);
+            assert_eq!(n.spell_interval(&comma).unwrap(), vec![0; n.len()]);
             // The octave and the fifth are still what they always were.
             assert_eq!(n.generators()[0][..2], pythagorean.generators()[0][..]);
             assert_eq!(n.generators()[1][..2], pythagorean.generators()[1][..]);
@@ -932,12 +952,12 @@ mod tests {
         // The meantone third is a plain E and the archytas seventh a plain Bb,
         // where just intonation needs an accidental on each.
         let meantone = tempered("2.3.5", &[(81, 80)]);
-        assert_eq!(meantone.spell(&[0, 0, 1]).unwrap(), vec![0, 4]);
+        assert_eq!(meantone.spell_interval(&[0, 0, 1]).unwrap(), vec![0, 4]);
         assert_eq!(note_of(&meantone, 5, 4), "E5");
         assert_eq!(note_of(&meantone, 81, 64), "E5");
 
         let archytas = tempered("2.3.7", &[(64, 63)]);
-        assert_eq!(archytas.spell(&[0, 0, 1]).unwrap(), vec![4, -2]);
+        assert_eq!(archytas.spell_interval(&[0, 0, 1]).unwrap(), vec![4, -2]);
         assert_eq!(note_of(&archytas, 7, 4), "Bb5");
         assert_eq!(note_of(&archytas, 16, 9), "Bb5");
     }
@@ -948,7 +968,7 @@ mod tests {
         // and the notation spells as the just intonation one does. The two are
         // not equal, since each carries the temperament it notates.
         let marvel = tempered("2.3.5.7", &[(225, 224)]);
-        assert_eq!(marvel.rank(), 4);
+        assert_eq!(marvel.len(), 4);
         assert_eq!(marvel.generators(), notation("2.3.5.7").generators());
         assert_ne!(marvel.temperament(), notation("2.3.5.7").temperament());
 
@@ -974,7 +994,7 @@ mod tests {
     fn the_smallest_notation_drops_an_accidental_that_is_not_tempered_out() {
         // Septimal meantone has two notations. Keeping the accidental for 7
         // writes the harmonic seventh as a lowered Bb; the smallest writes the
-        // same pitch with sharps and flats alone, as A#.
+        // same tempered interval with sharps and flats alone, as A#.
         let options = options_of("2.3.5.7", &[(81, 80), (225, 224)]);
         assert_eq!(ranks(&options), vec![2, 3]);
 
@@ -990,13 +1010,13 @@ mod tests {
         // Schismatic reaches 5 along the fifth chain too, eight fifths down,
         // so its just third is written as a diminished fourth.
         let schismatic = options_of("2.3.5", &[(32805, 32768)]);
-        assert_eq!(schismatic[0].rank(), 2);
+        assert_eq!(schismatic[0].len(), 2);
         assert_eq!(note_of(&schismatic[0], 5, 4), "Fb5");
 
         // Marvel is rank 3, so its smallest notation keeps one accidental. Only
         // the one for 5 works; keeping the one for 7 leaves 5 unreachable.
         let marvel = options_of("2.3.5.7", &[(225, 224)]);
-        assert_eq!(marvel[0].rank(), 3);
+        assert_eq!(marvel[0].len(), 3);
         assert_eq!(accidental_ratios(&marvel[0]), vec![(81, 80)]);
         assert_eq!(note_of(&marvel[0], 5, 4), "vE5");
         assert_eq!(note_of(&marvel[0], 7, 4), "vvA#5");
@@ -1123,7 +1143,7 @@ mod tests {
         }
 
         // The answer is a subgroup whose accidental does fit. 24et over 2.3.5 is
-        // contorted and saturates to 12et, but over 2.3.5.11 its quartertone is
+        // not primitive and saturates to 12et, but over 2.3.5.11 its quartertone is
         // 33/32 and worth exactly one step.
         let options = et_options(24, "2.3.5.11");
         assert_eq!(ranks(&options), vec![3]);
@@ -1200,20 +1220,20 @@ mod tests {
 
     #[test]
     fn spelling_the_spelled_settles() {
-        // The best spelling of a pitch is already `spell`'s fixed point:
+        // The best spelling of a tempered interval is already `spell`'s fixed point:
         // reading it back as a just interval and spelling again should not
         // move it - the same property `Simplifier::simplify` settles into on
         // its own answer.
         for (divisions, subgroup) in [(41, "2.3.5.7.11"), (31, "2.3.5.7"), (22, "2.3.5")] {
             let notation = et_options(divisions, subgroup).pop().unwrap();
             for ups in -20..=60 {
-                let mut spelling = vec![0; notation.rank()];
+                let mut spelling = vec![0; notation.len()];
                 spelling[2] = ups;
-                let interval = notation.to_just(&spelling).unwrap();
+                let interval = notation.to_interval(&spelling).unwrap();
 
-                let spelled = notation.spell(&interval).unwrap();
+                let spelled = notation.spell_interval(&interval).unwrap();
                 let round_trip = notation
-                    .spell(&notation.to_just(&spelled).unwrap())
+                    .spell_interval(&notation.to_interval(&spelled).unwrap())
                     .unwrap();
                 assert_eq!(
                     round_trip, spelled,
@@ -1324,7 +1344,7 @@ mod tests {
 
         let syntonic = derive_accidentals(&subgroup).unwrap()[0].clone();
         let notation = Notation::from_accidentals(&temperament, &[syntonic]).unwrap();
-        assert_eq!(notation.rank(), 3);
+        assert_eq!(notation.len(), 3);
         assert_eq!(note_of(&notation, 5, 4), "vE5");
     }
 
@@ -1344,7 +1364,7 @@ mod tests {
 
     #[test]
     fn register_does_not_change_the_spelling() {
-        // Octaves cost nothing to write, so moving a pitch by octaves moves
+        // Octaves cost nothing to write, so moving an interval by octaves moves
         // only its octave coordinate. The seed once charged for them and got
         // this wrong far from C5.
         for n in et_options(22, "2.3.5.7")
@@ -1352,30 +1372,30 @@ mod tests {
             .chain(options_of("2.3.5.7.11", &[(441, 440), (896, 891)]))
         {
             for interval in small_intervals(n.dim()) {
-                let spelling = n.spell(&interval).unwrap();
+                let spelling = n.spell_interval(&interval).unwrap();
                 for octaves in [-12, -3, 4, 9] {
                     let mut moved = interval.clone();
                     moved[0] += octaves;
                     let mut expected = spelling.clone();
                     expected[0] += octaves;
-                    assert_eq!(n.spell(&moved).unwrap(), expected);
+                    assert_eq!(n.spell_interval(&moved).unwrap(), expected);
                 }
             }
         }
     }
 
     #[test]
-    fn respell_walks_wide_enough() {
-        // Pele's rank 4 notation has pitches whose best spelling a walk of one
+    fn spellings_walk_wide_enough() {
+        // Pele's rank 4 notation has intervals whose best spelling a walk of one
         // enharmonic either way misses, `E##` found as `vdF##`. Two finds them all.
         let options = options_of("2.3.5.7.11", &[(441, 440), (896, 891)]);
         let n = &options[1];
         let mut missed_at_one = 0;
         for interval in small_intervals(n.dim()) {
-            let spelling = n.spell(&interval).unwrap();
-            let wide = n.respell_within(&spelling, 3, 5).unwrap();
-            assert_eq!(n.respell(&spelling, 3).unwrap(), wide);
-            if n.respell_within(&spelling, 1, 1).unwrap()[0] != wide[0] {
+            let tempered = n.temperament().temper(&interval).unwrap();
+            let wide = n.spellings_within(&tempered, 3, 5).unwrap();
+            assert_eq!(n.spellings(&tempered, 3).unwrap(), wide);
+            if n.spellings_within(&tempered, 1, 1).unwrap()[0] != wide[0] {
                 missed_at_one += 1;
             }
         }
@@ -1449,17 +1469,17 @@ mod tests {
     #[test]
     fn a_notation_of_a_given_size() {
         let subgroup: Subgroup = "2.3.5.7.11".parse().unwrap();
-        let commas = [(225, 224), (1029, 1024), (385, 384)]
-            .map(|(n, d)| subgroup.factorize(n, d).unwrap());
+        let commas =
+            [(225, 224), (1029, 1024), (385, 384)].map(|(n, d)| subgroup.factorize(n, d).unwrap());
         let miracle = Temperament::from_commas(&commas, &subgroup).unwrap();
         let accidentals = derive_accidentals(&subgroup).unwrap();
 
-        // The fifth chain alone does not reach every pitch of miracle.
+        // The fifth chain alone does not reach every tempered interval of miracle.
         assert!(Notation::with_count(&miracle, &accidentals, 0).is_err());
         let one = Notation::with_count(&miracle, &accidentals, 1).unwrap();
         assert_eq!(accidental_ratios(&one), vec![(81, 80)]);
         let three = Notation::with_count(&miracle, &accidentals, 3).unwrap();
-        assert_eq!(three.rank(), 5);
+        assert_eq!(three.len(), 5);
         assert!(Notation::with_count(&miracle, &accidentals, 4).is_err());
 
         // Only the images matter: in 41et 49/48 is a step as good as 81/80.
@@ -1470,9 +1490,13 @@ mod tests {
             symbols: ('^', 'v'),
         };
         let n = Notation::with_count(&t, &[septimal], 1).unwrap();
-        let syntonic = Notation::with_count(&t, &derive_accidentals(&subgroup).unwrap()[..1], 1).unwrap();
+        let syntonic =
+            Notation::with_count(&t, &derive_accidentals(&subgroup).unwrap()[..1], 1).unwrap();
         assert_eq!(n.enharmonics(), syntonic.enharmonics());
-        assert_eq!(n.nominal_costs().unwrap(), syntonic.nominal_costs().unwrap());
+        assert_eq!(
+            n.nominal_costs().unwrap(),
+            syntonic.nominal_costs().unwrap()
+        );
     }
 
     #[test]
@@ -1515,7 +1539,7 @@ mod tests {
         assert_eq!(n.enharmonics().len(), 1);
         // Twelve fifths less seven octaves, which is the pythagorean comma.
         assert_eq!(n.enharmonics()[0], vec![-7, 12]);
-        let comma = n.to_just(&n.enharmonics()[0]).unwrap();
+        let comma = n.to_interval(&n.enharmonics()[0]).unwrap();
         assert_eq!(subgroup.to_ratio(&comma).unwrap(), (531441, 524288));
     }
 
@@ -1534,7 +1558,7 @@ mod tests {
         assert_eq!(bare.enharmonics().len(), 1);
         assert_eq!(raised.enharmonics().len(), 2);
         for e in raised.enharmonics() {
-            assert_eq!(raised.pitch(e).unwrap(), vec![0]);
+            assert_eq!(raised.temper(e).unwrap(), vec![0]);
         }
 
         // Every requested notation has one enharmonic per extra coordinate over
@@ -1547,10 +1571,10 @@ mod tests {
                 let Ok(n) = Notation::from_accidentals(&t, &accidentals[..count]) else {
                     continue;
                 };
-                assert_eq!(n.enharmonics().len(), n.rank() - t.rank());
+                assert_eq!(n.enharmonics().len(), n.len() - t.rank());
                 for e in n.enharmonics() {
-                    // Worth nothing as a pitch, but not the unison on the page.
-                    assert_eq!(n.pitch(e).unwrap(), vec![0; t.rank()]);
+                    // Tempers to nothing, but is not the unison on the page.
+                    assert_eq!(n.temper(e).unwrap(), vec![0; t.rank()]);
                     assert!(e.iter().any(|&x| x != 0));
                 }
             }
@@ -1565,7 +1589,7 @@ mod tests {
         let commas = [vec![-4, 4, -1, 0], vec![1, 2, -3, 1]];
         let t = Temperament::from_commas(&commas, &subgroup).unwrap();
         let n = Notation::from_accidentals(&t, &[]).unwrap();
-        assert_eq!(n.rank(), t.rank());
+        assert_eq!(n.len(), t.rank());
         assert!(n.enharmonics().is_empty());
     }
 
@@ -1627,10 +1651,10 @@ mod tests {
 
         let options_49_48 =
             Notation::options_with(&temperament, std::slice::from_ref(&acc_49_48)).unwrap();
-        assert_eq!(options_49_48.last().unwrap().rank(), 3);
+        assert_eq!(options_49_48.last().unwrap().len(), 3);
 
         let options_50_49 =
             Notation::options_with(&temperament, std::slice::from_ref(&acc_50_49)).unwrap();
-        assert_eq!(options_50_49.last().unwrap().rank(), 3);
+        assert_eq!(options_50_49.last().unwrap().len(), 3);
     }
 }

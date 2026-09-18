@@ -7,8 +7,8 @@ Everything stated here was checked against the code at the time of writing.
 ## The model
 
 A **temperament** is a surjection `T : Z^n -> Z^r` from the interval vectors of a
-just intonation subgroup to pitches. It is the ground truth: it says which
-intervals are the same note.
+just intonation subgroup to tempered intervals. It is the ground truth: it says
+which intervals are the same note.
 
 A **notation** is a legible interface to it. Notation coordinates are counts of
 generators - the octave `2/1`, the fifth `3/2`, then one accidental per prime
@@ -20,21 +20,43 @@ Just intonation is a useful fiction about the temperament. The approximations
 matter, but in 41et `14/11` and `81/64` **are** one note, and so are `E`, `vvvF`
 and `^^D#`.
 
+## Words
+
+Three spaces, one name each, and each vector is only ever called by its name:
+
+- an **interval** is a just interval: prime exponents over the subgroup, of
+  length `Subgroup::dim`;
+- a **spelling** is notation coordinates: the octave, the fifth, then each
+  accidental, of length `Notation::len`. `note` prints one;
+- a **tempered** interval is generator counts in the temperament, of length
+  `Temperament::rank`.
+
+**Pitch** is kept for a real size in cents, which needs a tuning the library
+does not have yet.
+
+Mapping **down** is `temper`, from an interval or a spelling, and needs no
+choice. Going **up** chooses an element of a coset, always starts from a tempered
+interval, and is named for what it chooses: `spell` and `spellings`, `simplify`
+and `simplifications`. Each has an `_interval` form that tempers a just interval
+first. `Temperament::preimage` is an arbitrary element of the coset, not a
+choice, and `Notation::to_interval` is a spelling's literal reading, taking each
+accidental as the ratio it is named for.
+
 ## A notation is its generators
 
 Everything a notation does follows from where its generators sit in the
 temperament:
 
 ```
-images      = temperament.map_all(generators)   // rank x r
-enharmonics = kernel_left(images)               // rank - rank(temperament)
+images      = temperament.temper_all(generators)   // len x r
+enharmonics = kernel_left(images)                  // len - rank(temperament)
 ```
 
-`images` is `Notation::pitch`, the map from a written note down to what it
-sounds. Its kernel is the **enharmonic lattice**: the written notes the
-temperament calls one pitch. `Notation::build` is those two lines plus two
-checks - that every accidental beyond the first has a symbol, and that the
-generators reach every pitch at all (`spans`).
+`images` is `Notation::temper`, the map from a spelling down to what it sounds.
+Its kernel is the **enharmonic lattice**: the spellings the temperament makes
+the same. `from_accidentals` is those two lines plus two checks - that no two
+symbols collide, and that the generators reach every tempered interval at all
+(`spans`).
 
 **There is no map from just intonation to choose**, and that is the whole shape
 of the design. Two notations keeping the same accidentals over the same
@@ -42,22 +64,23 @@ temperament are the same notation, so `generators()` is what to compare.
 
 ## The two questions
 
-A pitch has two questions and they are independent. Neither constrains the other,
-and the library answers them in different places.
+A tempered interval has two questions and they are independent. Neither
+constrains the other, and the library answers them in different places.
 
-**What is this note?** - ranked just intervals, `Simplifier::candidates`. Depends
-on the temperament alone, so every notation of a temperament answers alike.
+**What is this note?** - ranked just intervals, `Simplifier::simplifications`.
+Depends on the temperament alone, so every notation of a temperament answers
+alike.
 
-**How else can I write it?** - ranked spellings, `Notation::respell`. The
-spellings of one pitch are a coset of the enharmonics, so this depends on the
+**How can I write it?** - ranked spellings, `Notation::spellings`. The spellings
+of one tempered interval are a coset of the enharmonics, so this depends on the
 generators and the temperament and on nothing else.
 
-`Notation::spell` composes the second with the temperament: ask what pitch an
-interval is, then ask which of that pitch's spellings reads best. In 41et
-`spell(14/11)` and `spell(81/64)` therefore give the same answer, because they
-are the same note.
+`spell_interval` composes the second with the temperament: temper the interval,
+then ask which of its spellings reads best. In 41et `14/11` and `81/64` therefore
+give the same answer, because they are the same note.
 
-`cargo run --example candidates` and `--example spellings` are the two lists.
+`cargo run --example simplifications` and `--example spellings` are the two
+lists.
 
 ## Accidentals
 
@@ -99,7 +122,7 @@ from `C`. Measuring from `C` makes the flat side cheaper than the sharp side by
 one fifth throughout, which is enough to spell 5et's third `F` and 7et's `Eb`.
 Ties fall back to the coordinates, so the order never depends on how the search
 was walked. The octave does not appear: register costs nothing to write, and the
-pitch fixes it once the rest is chosen.
+tempered interval fixes it once the rest is chosen.
 
 ## Nominals are degrees
 
@@ -118,12 +141,12 @@ Exactly, not modulo seven: in 41et `E##########` has the letter of `5/4` but
 sits an octave below it.
 
 `nominal_spellings` is the cheapest spelling of each prime at its just degree,
-or `None` where no spelling of that pitch has that degree, and `nominal_costs`
-what those cost. Spellings at a fixed
-degree differ by the degree-zero enharmonics, so it is its own closest vector
-search on that slice - it does not read what `spell` happened to pick.
+or `None` where no spelling of the tempered prime has that degree, and
+`nominal_costs` what those cost. Spellings at a fixed degree differ by the
+degree-zero enharmonics, so it is its own closest vector search on that slice -
+it does not read what `spell` happened to pick.
 
-A pitch can be written at `d + g Z`, `g` the gcd of the enharmonics' degrees.
+A tempered interval can be written at `d + g Z`, `g` the gcd of the enharmonics' degrees.
 Where `g > 1` (41et's fifth chain, `g = 4`) or no enharmonic moves the degree
 (schismatic's), some letters are out of reach and the question has teeth. Where
 `g = 1` every letter is reachable and only the cost tells notations apart.
@@ -135,8 +158,8 @@ though `tA` is cheaper; the second lets 41et's middle one write `11/8` as `^^F`,
 two marks where just intonation has one, because it has nothing better.
 
 Only an accidental's image affects any of this. The ratio names it and is what
-`to_just` reads back; in 41et `49/48` is as good a step as `81/80`, though just
-intonation writes `49/48` on `D`, so `to_just(^C)` is letter-inconsistent.
+`to_interval` reads back; in 41et `49/48` is as good a step as `81/80`, though
+just intonation writes `49/48` on `D`, so `to_interval(^C)` is letter-inconsistent.
 
 ## The search: which accidentals to keep
 
@@ -148,7 +171,7 @@ That is all `NotationOptions` decides. Before searching it drops an accidental:
   direction, so it would be that accidental over again. `81/80` and `64/63` being
   one interval is a property of 41et, not a second symbol to read.
 
-Every subset of the rest is a candidate, if it reaches every pitch at all. Of
+Every subset of the rest is a candidate, if it reaches every tempered interval. Of
 each size the best is the one with
 
 1. the fewest primes failing `keeps_nominals`,
@@ -164,7 +187,7 @@ and `verify` prints it where not.
 
 Miracle is where the ranking earns its keep. Its octave and fifth leave a
 quotient of `Z/6`, six generators to the fifth, and `81/80` is one generator,
-`64/63` two and `33/32` three: `64/63` alone reaches only half the pitches. Every
+`64/63` two and `33/32` three: `64/63` alone reaches only half the tempered intervals. Every
 single accidental leaves 7 and 11 off their nominals, and the pairs tie three
 ways on a total of 46, each writing one of 5, 7 and 11 with two marks. The
 lower primes win, so it is `81/80 64/63` and `11/8 = ^>F`.
@@ -182,12 +205,14 @@ such a temperament. So if no accidental is worth a single step, an equal
 temperament is offered none at all.
 
 It has to be singled out, because above rank 1 no accidental can reach every
-pitch by itself and there is nothing for "worth one step" to generalise to.
+tempered interval by itself and there is nothing for "worth one step" to
+generalise to.
 
 The cost is that some equal temperaments get no notation rather than a bad one:
 25, 51 and 54 over `2.3.5`; 25, 54 and 57 over `2.3.5.7`; 54 and 57 over
-`2.3.5.7.11`. A wider subgroup is the answer - 24et is contorted over `2.3.5` but
-over `2.3.5.11` its quartertone is `33/32`, worth exactly one step.
+`2.3.5.7.11`. A wider subgroup is the answer - 24et over `2.3.5` is not
+primitive, saturating to 12et, but over `2.3.5.11` its quartertone is `33/32`,
+worth exactly one step.
 
 ## Which notation to recommend
 
@@ -214,7 +239,7 @@ the old rule, the new one agrees everywhere the old one found anything.
 
 ## Simplifying
 
-Which interval a tempered pitch "is" is a closest vector problem on the
+Which just interval a tempered interval "is" is a closest vector problem on the
 temperament's comma lattice.
 
 **Which norm.** Wilson, `sopfr`, the sum of the prime factors of numerator and
@@ -230,33 +255,34 @@ concern. `cargo run --release --example bench` times what runs repeatedly, on
 41et over `2.3.5.7.11`:
 
 ```
-Notation::spell             2.1 us
-Notation::respell(4)        1.3 us
-Notation::to_just            39 ns
-Simplifier::simplify         56 us
-Simplifier::candidates(8)    54 us
+Notation::spell                 3.0 us
+Notation::spellings(4)          3.0 us
+Notation::to_interval            39 ns
+Simplifier::simplify             58 us
+Simplifier::simplifications(8)   56 us
 ```
 
-`to_just` is a matrix multiply and not worth a second thought. **`spell` is no
-longer free**: it used to be one too, at the same 39 nanoseconds, and it is now a
-diophantine solve, a closest vector and a box walked under `spelling_cost`. Still
-cheap enough to spell every visible note on a redraw - a hundred notes is a
-quarter of a millisecond - but no longer in the same class, and not to be called
-in a loop that does not need it.
+`to_interval` is a matrix multiply and not worth a second thought; the bench's
+first block shows it at 185 ns, which is whatever the `spellings` loop before it
+leaves the allocator in, since the same call is 39 ns in the other two blocks.
+**`spell` is not free**: it is a diophantine solve, a closest vector and a box
+walked under `spelling_cost`. Still cheap enough to spell every visible note on a
+redraw - a hundred notes is a third of a millisecond - but not to be called in a
+loop that does not need it. `spellings` costs the same, since the solve and the
+closest vector are most of it.
 
 It was 48 microseconds before two fixes. The first is the one
 `Simplifier::search` needed once: ranking a candidate cloned its coordinates to
 break the tie with. The second was narrowing `RESPELL_WIDTH` from 5 to 2, which
-is where `respell` asked for more than one answer spends almost everything -
+is where `spellings` asked for more than one answer spends almost everything -
 that call went from 8.4 microseconds to 1.3.
 
 A special case for one answer, which is what `spell` asks for, was worth 3.4x at
-width 5 and 13% at width 2, so it is gone: most callers want several anyway,
-since a list of one may be the spelling they already have.
+width 5 and 13% at width 2, so it is gone: most callers want several anyway.
 
 ## Everything here walks a box, and every box needs a reduced basis
 
-`respell`, `simplify` and the examples all do the same thing - seed a point,
+`spellings`, `simplify` and the examples all do the same thing - seed a point,
 then walk a bounded box around it under the norm actually wanted - and the
 same two mistakes were made in each.
 
@@ -269,8 +295,8 @@ comes out short in the wrong sense. `Notation::weights` is built once and used
 for both the reduction and the search, carrying the squares of what `spelling_cost`
 costs - four for a fifth, forty nine for a mark, and **nothing for an octave**.
 It once charged four for an octave too, which pulled the seed towards `C5` and
-made the best spelling depend on register: 2169 of 309094 calls in
-`respell_width` got even the single best answer wrong at width 1. The form is
+made the best spelling depend on register: 2169 of 309094 calls in the width
+sweep got even the single best answer wrong at width 1. The form is
 then only semidefinite, but no enharmonic is a stack of octaves, so it is
 definite on the enharmonic lattice and LLL and the closest vector are unaffected.
 
@@ -287,7 +313,8 @@ away from `225/224`.
   for 11 and writes `11/8` as `F#` anyway - which is right, since `F#` and `tF`
   are the same note and `F#` is simpler. Where the cheapest symbol carries the
   wrong harmonic hint this is taste, and there is no rule underneath it: `spell`
-  is handed a pitch, not a prime, so it cannot prefer the accidental belonging to
+  is handed a tempered interval, not a prime, so it cannot prefer the accidental
+  belonging to
   what is being written. `nominal_costs` is where intent shows: it asks for the
   prime on its letter, whatever `spell` would choose.
 - **The recommendation is still a rule, not a proof.** It agrees with every
@@ -300,23 +327,22 @@ away from `225/224`.
   provably not enough: `a_radius_of_two_is_enough_and_a_radius_of_one_is_not`
   pins the case, 9et reaching `1/39366` of norm 29 where a radius of 1 stops at
   `1/34560` of norm 30.
-- **`respell` is a bounded search too.** The seed is an exact closest vector,
+- **`spellings` is a bounded search too.** The seed is an exact closest vector,
   so the walk only corrects for the quadratic form standing in for
-  `spelling_cost`. `cargo run --release --example respell_width` measures how
+  `spelling_cost`. `cargo run --release --example spellings_width` measures how
   far that correction reaches, against a much wider walk, over every notation
-  of both data files and the equal temperaments to 72, from both good and far
-  seeds (309094 calls):
+  of both data files and the equal temperaments to 72 (154547 calls):
 
   ```
   width   top 1 wrong   top 3 wrong   top 5 wrong
-    0         26126        all           all
-    1            70       3964        135181
-    2             0          0          1911
+    0         13628        all           all
+    1            35       1952         67643
+    2             0          0           961
   ```
 
-  Width 1 misses real answers, not ties - pele writes a pitch `vdF##` where
-  `E##` is cheaper - so `RESPELL_WIDTH` is 2, pinned by
-  `respell_walks_wide_enough`. That is exact for the first three answers on
+  Width 1 misses real answers, not ties - pele writes a tempered interval `vdF##`
+  where `E##` is cheaper - so `RESPELL_WIDTH` is 2, pinned by
+  `spellings_walk_wide_enough`. That is exact for the first three answers on
   everything swept, and approximate beyond: no fixed width can be exact for
   every `count`. An exact version would bound the walk by cost instead - the L2
   form never exceeds `spelling_cost`, so every spelling within cost `C` lies in
@@ -328,8 +354,8 @@ away from `225/224`.
 - **An accidental defined as one step** - what ups and downs uses in general - is
   still not available, which is why some equal temperaments get no notation.
 - **Accidentals off the derived set: the maths does not care, the names do.**
-  `from_accidentals` takes whatever list it is given, and everything downstream - `pitch`,
-  `spell`, `respell`, the enharmonics, and all of `Search`'s classification -
+  `from_accidentals` takes whatever list it is given, and everything downstream -
+  `temper`, `spell`, `spellings`, the enharmonics, and all of `NotationOptions` -
   treats the accidentals as an opaque list. Handed Johnston's pair, `81/80` and
   the septimal `36/35`, it builds and spells correctly: `7/4` comes out
   `[2, -2, 1, -1]`, which is `16/9` raised a syntonic comma and lowered a
@@ -352,8 +378,9 @@ away from `225/224`.
 
 ## Where the code lives
 
-- `notation.rs` - the `Notation` type: `generators`, `pitch`, `enharmonics`,
-  `spell`, `respell`, `note`, `nominal_costs` and `keeps_nominals`, the ranking
+- `notation.rs` - the `Notation` type: `generators`, `temper`, `to_interval`,
+  `enharmonics`, `spell`, `spellings`, `note`, `nominal_spellings` and
+  `keeps_nominals`, the ranking
   `spelling_cost`, the degree map, and the derivation of a single accidental.
 - `notation_options.rs` - `Notation::options` and `with_count`: the subset
   search and its ranking. Tested through `options`.
@@ -364,5 +391,6 @@ away from `225/224`.
 
 Examples: `verify` sweeps the invariants and prints a failure count; `dump`
 prints a fingerprint of every notation to be diffed across a change; `notations`
-lays out each run; `candidates` and `spellings` are the two questions;
+lays out each run; `simplifications` and `spellings` are the two questions;
+`spellings_width` sweeps how far `spellings` has to walk;
 `simplify` and `miracle` walk one temperament; `bench` times the hot path.

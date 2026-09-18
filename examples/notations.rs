@@ -11,7 +11,14 @@ use xen_utils::{Notation, Subgroup, Temperament};
 
 const TEMPERAMENTS: &str = include_str!("../data/temperaments.txt");
 
-const HEADER: [&str; 6] = ["temperament", "subgroup", "rank", "", "accidentals", "on the nominals"];
+const HEADER: [&str; 6] = [
+    "temperament",
+    "subgroup",
+    "rank",
+    "",
+    "accidentals",
+    "on the nominals",
+];
 
 fn main() {
     let mut rows = vec![HEADER.map(String::from)];
@@ -134,12 +141,16 @@ fn parse_temperament(definition: &str, subgroup: &Subgroup) -> Result<Temperamen
 /// nominal, with what `spell` chooses where that differs.
 fn spelling(notation: &Notation) -> String {
     let subgroup = notation.subgroup();
-    let nominal = notation.nominal_spellings().expect("every prime has an accidental");
-    let mut cell = format!("[{}]", notation.rank());
+    let nominal = notation
+        .nominal_spellings()
+        .expect("every prime has an accidental");
+    let mut cell = format!("[{}]", notation.len());
     for (index, on_nominal) in (2..subgroup.dim()).zip(nominal) {
         let harmonic = octave_reduce(subgroup, index);
         let (num, den) = subgroup.to_ratio(&harmonic).expect("a single prime fits");
-        let spelled = notation.spell(&harmonic).expect("built over subgroup");
+        let spelled = notation
+            .spell_interval(&harmonic)
+            .expect("built over subgroup");
         // The nominal spelling is of the prime itself, so bring it down by the
         // same octaves the harmonic was.
         let on_nominal = on_nominal.map(|mut coordinates| {

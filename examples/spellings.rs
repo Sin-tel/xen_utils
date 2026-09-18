@@ -1,4 +1,4 @@
-//! The candidate spellings of a pitch in an equal temperament.
+//! The best spellings of every step of an equal temperament.
 
 use xen_utils::{Notation, Simplifier, Subgroup, Temperament};
 
@@ -14,8 +14,8 @@ fn main() {
         let simplifier = Simplifier::new(&temperament).unwrap();
 
         println!(
-            "\n{divisions}et over {subgroup}, notation of rank {}",
-            notation.rank()
+            "\n{divisions}et over {subgroup}, notation of length {}",
+            notation.len()
         );
         println!(
             "enharmonics: {}",
@@ -29,13 +29,12 @@ fn main() {
         println!("\n{:>4}  {:>9}  ways to write it", "step", "reading");
 
         for steps in 0..divisions + 1 {
-            let interval = temperament.map_inverse(&[steps]).unwrap();
-            let seed = notation.spell(&interval).unwrap();
-            let reading = simplifier.simplify(&interval).unwrap();
+            let tempered = [steps];
+            let reading = simplifier.simplify(&tempered).unwrap();
             let (num, den) = subgroup.to_ratio(&reading).unwrap();
 
             let ways: Vec<String> = notation
-                .respell(&seed, SHOWN)
+                .spellings(&tempered, SHOWN)
                 .unwrap()
                 .iter()
                 .map(|c| format!("{:10}", notation.note(c)))

@@ -4,7 +4,6 @@ use diophantine::{Matrix, cvp_exact};
 
 use crate::Error;
 use crate::Temperament;
-use crate::primes::Subgroup;
 use crate::util::subtract;
 
 /// How far around the best so far to look, in each direction along each reduced
@@ -12,13 +11,12 @@ use crate::util::subtract;
 /// so the radius bounds one step rather than the whole walk.
 const SEARCH_RADIUS: i64 = 2;
 
-/// Rewrites a just interval as the simplest one the temperament makes equal to
-/// it.
+/// Finds the simplest just intervals that temper to a given tempered interval.
 ///
 /// "Simplest" here means the Wilson norm [`sopfr`].
 #[derive(Debug, Clone)]
 pub struct Simplifier {
-    subgroup: Subgroup,
+    temperament: Temperament,
     lattice: Matrix<i64>,
     weights: Matrix<f64>,
 }
@@ -30,12 +28,10 @@ impl Simplifier {
     /// Returns [`Error::InvalidDimensions`] if the comma lattice cannot be
     /// computed or reduced.
     pub fn new(temperament: &Temperament) -> Result<Self, Error> {
-        let subgroup = temperament.subgroup().clone();
-        let weights = subgroup.weights();
-
+        let weights = temperament.subgroup().weights();
         let lattice = temperament.reduced_comma_basis()?;
         Ok(Simplifier {
-            subgroup,
+            temperament: temperament.clone(),
             lattice,
             weights,
         })
@@ -46,47 +42,66 @@ impl Simplifier {
         &self.lattice
     }
 
-    /// The simplest just interval the temperament makes equal to `interval`.
+    /// The simplest just interval that tempers to `tempered`.
     ///
     /// # Errors
-    /// Returns [`Error::InvalidDimensions`] if `interval` does not have one
-    /// entry per basis element of the subgroup.
-    pub fn simplify(&self, interval: &[i64]) -> Result<Vec<i64>, Error> {
+    /// Returns [`Error::InvalidDimensions`] if `tempered` does not have one
+    /// entry per generator of the temperament.
+    pub fn simplify(&self, tempered: &[i64]) -> Result<Vec<i64>, Error> {
         Ok(self
-            .simplify_within(interval, SEARCH_RADIUS)?
+            .simplify_within(tempered, SEARCH_RADIUS)?
             .swap_remove(0))
     }
 
-    /// Returns a sorted list of `count` just intervals the temperament makes equal to
-    /// `interval`, simplest first.
+    /// [`simplify`](Self::simplify) the tempered interval a just interval maps
+    /// to: the simplest just interval the temperament makes equal to it.
     ///
     /// # Errors
     /// Returns [`Error::InvalidDimensions`] if `interval` does not have one
     /// entry per basis element of the subgroup.
-    pub fn candidates(&self, interval: &[i64], count: usize) -> Result<Matrix<i64>, Error> {
-        let mut found = self.simplify_within(interval, SEARCH_RADIUS)?;
+    pub fn simplify_interval(&self, interval: &[i64]) -> Result<Vec<i64>, Error> {
+        self.simplify(&self.temperament.temper(interval)?)
+    }
+
+    /// The `count` simplest just intervals that temper to `tempered`, simplest
+    /// first. There may be fewer: only those the search walks past are ranked.
+    ///
+    /// # Errors
+    /// Returns [`Error::InvalidDimensions`] if `tempered` does not have one
+    /// entry per generator of the temperament.
+    pub fn simplifications(&self, tempered: &[i64], count: usize) -> Result<Matrix<i64>, Error> {
+        let mut found = self.simplify_within(tempered, SEARCH_RADIUS)?;
         found.truncate(count);
         Ok(found)
     }
 
-    /// [`simplify`](Self::simplify), stepping by a ball of the given radius
-    /// rather than the one [`SEARCH_RADIUS`] fixes. This is what the radius is
-    /// chosen by.
-    fn simplify_within(&self, interval: &[i64], radius: i64) -> Result<Matrix<i64>, Error> {
-        if interval.len() != self.subgroup.dim() {
-            return Err(Error::InvalidDimensions(format!(
-                "interval has {} entries, expected {}",
-                interval.len(),
-                self.subgroup.dim()
-            )));
-        }
+    /// [`simplifications`](Self::simplifications) of the tempered interval a
+    /// just interval maps to.
+    ///
+    /// # Errors
+    /// Returns [`Error::InvalidDimensions`] if `interval` does not have one
+    /// entry per basis element of the subgroup.
+    pub fn simplifications_interval(
+        &self,
+        interval: &[i64],
+        count: usize,
+    ) -> Result<Matrix<i64>, Error> {
+        self.simplifications(&self.temperament.temper(interval)?, count)
+    }
+
+    /// Everything the search walks past, simplest first, stepping by a ball of
+    /// the given radius rather than the one [`SEARCH_RADIUS`] fixes. This is
+    /// what the radius is chosen by.
+    fn simplify_within(&self, tempered: &[i64], radius: i64) -> Result<Matrix<i64>, Error> {
+        let interval = self.temperament.preimage(tempered)?;
         if self.lattice.is_empty() {
-            return Ok(vec![interval.to_vec()]);
+            return Ok(vec![interval]);
         }
 
+        // `preimage` hands back an arbitrary interval, so reduce first.
         let seed = subtract(
-            interval,
-            &cvp_exact(interval, &self.lattice, &self.weights)?,
+            &interval,
+            &cvp_exact(&interval, &self.lattice, &self.weights)?,
         );
         Ok(self.search(&seed, radius))
     }
@@ -146,7 +161,7 @@ impl Simplifier {
     /// What the search minimizes: the Wilson norm, and the quadratic norm
     /// standing in for it as a tie-break.
     fn rank(&self, interval: &[i64]) -> (i64, i64) {
-        let primes = self.subgroup.basis();
+        let primes = self.temperament.subgroup().basis();
         let squared = interval
             .iter()
             .zip(primes)
@@ -170,6 +185,7 @@ pub fn sopfr(interval: &[i64], primes: &[u32]) -> i64 {
 mod tests {
     use super::*;
     use crate::Notation;
+    use crate::primes::Subgroup;
     use crate::temperament::Temperament;
 
     /// A notation of the equal temperament of `divisions` over `subgroup`, and
@@ -189,14 +205,14 @@ mod tests {
 
     /// The just interval of `ups` of the first accidental stacked on `C`.
     fn stack(notation: &Notation, ups: i64) -> Vec<i64> {
-        let mut spelling = vec![0; notation.rank()];
+        let mut spelling = vec![0; notation.len()];
         spelling[2] = ups;
-        notation.to_just(&spelling).unwrap()
+        notation.to_interval(&spelling).unwrap()
     }
 
     /// What `interval` simplifies to, as a ratio.
     fn simplified(notation: &Notation, simplifier: &Simplifier, interval: &[i64]) -> (u64, u64) {
-        let simplified = simplifier.simplify(interval).unwrap();
+        let simplified = simplifier.simplify_interval(interval).unwrap();
         notation.subgroup().to_ratio(&simplified).unwrap()
     }
 
@@ -218,9 +234,12 @@ mod tests {
         let stacked = stack(&notation, 41);
         assert_eq!(stacked, vec![-164, 164, -41, 0, 0]);
 
-        let simplified = simplifier.simplify(&stacked).unwrap();
+        let simplified = simplifier.simplify_interval(&stacked).unwrap();
         assert_eq!(simplified, vec![1, 0, 0, 0, 0]);
-        assert_eq!(notation.note(&notation.spell(&simplified).unwrap()), "C6");
+        assert_eq!(
+            notation.note(&notation.spell_interval(&simplified).unwrap()),
+            "C6"
+        );
     }
 
     #[test]
@@ -262,7 +281,12 @@ mod tests {
 
         // Under the quadratic norm the seed really is the undecimal comma, so
         // it is the walk that is doing this, not the reduction.
-        let seed = simplifier.simplify_within(&stack(&notation, 1), 0).unwrap();
+        let seed = simplifier
+            .simplify_within(
+                &notation.temperament().temper(&stack(&notation, 1)).unwrap(),
+                0,
+            )
+            .unwrap();
         assert_eq!(notation.subgroup().to_ratio(&seed[0]).unwrap(), (45, 44));
     }
 
@@ -273,7 +297,7 @@ mod tests {
         // radius of one stops at 1/34560, of norm 30.
         {
             let (notation, simplifier) = simplifier(9, "2.3.5.7");
-            let far = [-15, 0, 0, 0];
+            let far = notation.temperament().temper(&[-15, 0, 0, 0]).unwrap();
             let primes = notation.subgroup().basis();
             let ratio = |interval: &[i64]| notation.subgroup().to_ratio(interval).unwrap();
             assert_eq!(
@@ -298,14 +322,17 @@ mod tests {
         ] {
             let (notation, simplifier) = simplifier(divisions, subgroup);
             assert!(
-                notation.rank() > 2,
+                notation.len() > 2,
                 "{divisions}et over {subgroup} has no accidental"
             );
             for ups in -30..=60 {
-                let stacked = stack(&notation, ups);
+                let tempered = notation
+                    .temperament()
+                    .temper(&stack(&notation, ups))
+                    .unwrap();
                 assert_eq!(
-                    simplifier.simplify_within(&stacked, 3).unwrap()[0],
-                    simplifier.simplify_within(&stacked, 2).unwrap()[0],
+                    simplifier.simplify_within(&tempered, 3).unwrap()[0],
+                    simplifier.simplify_within(&tempered, 2).unwrap()[0],
                     "{divisions}et over {subgroup}, {ups} ups: a wider step moved the answer"
                 );
             }
@@ -317,7 +344,7 @@ mod tests {
         // `search`'s round loop keeps re-centring on the best point found so
         // far, rather than searching one ball around the seed and stopping -
         // which is what it could afford to do if the first ball always settled
-        // the question, the way `Notation::respell`'s single ball does.
+        // the question, the way `Notation::spellings`' single ball does.
         //
         // Augmented's accidental is a comma that moves quickly along the fifth
         // chain, so six of them lands somewhere the first ball's local optimum,
@@ -333,7 +360,9 @@ mod tests {
         let simplifier = Simplifier::new(&temperament).unwrap();
 
         let stacked = stack(&notation, 6);
-        let all = simplifier.candidates(&stacked, usize::MAX).unwrap();
+        let all = simplifier
+            .simplifications_interval(&stacked, usize::MAX)
+            .unwrap();
 
         assert_eq!(
             subgroup.to_ratio(&all[0]).unwrap(),
@@ -355,27 +384,30 @@ mod tests {
     }
 
     #[test]
-    fn simplifying_keeps_the_pitch_and_settles() {
+    fn simplifying_keeps_the_tempered_interval_and_settles() {
         for (divisions, subgroup) in [(41, "2.3.5.7.11"), (31, "2.3.5.7"), (22, "2.3.5")] {
             let (notation, simplifier) = simplifier(divisions, subgroup);
             assert!(
-                notation.rank() > 2,
+                notation.len() > 2,
                 "{divisions}et over {subgroup} has no accidental"
             );
             let temperament = notation.temperament();
             for ups in -20..=60 {
                 let stacked = stack(&notation, ups);
-                let simplified = simplifier.simplify(&stacked).unwrap();
+                let simplified = simplifier.simplify_interval(&stacked).unwrap();
 
                 assert_eq!(
-                    temperament.map(&simplified).unwrap(),
-                    temperament.map(&stacked).unwrap()
+                    temperament.temper(&simplified).unwrap(),
+                    temperament.temper(&stacked).unwrap()
                 );
                 assert!(
                     sopfr(&simplified, notation.subgroup().basis())
                         <= sopfr(&stacked, notation.subgroup().basis())
                 );
-                assert_eq!(simplifier.simplify(&simplified).unwrap(), simplified);
+                assert_eq!(
+                    simplifier.simplify_interval(&simplified).unwrap(),
+                    simplified
+                );
             }
         }
     }
@@ -388,9 +420,9 @@ mod tests {
             let (notation, simplifier) = simplifier(divisions, subgroup);
             for ups in -20..=60 {
                 let stacked = stack(&notation, ups);
-                let simplified = simplifier.simplify(&stacked).unwrap();
+                let simplified = simplifier.simplify_interval(&stacked).unwrap();
                 assert_eq!(
-                    simplifier.simplify(&simplified).unwrap(),
+                    simplifier.simplify_interval(&simplified).unwrap(),
                     simplified,
                     "{divisions}et over {subgroup}, {ups} ups"
                 );
@@ -399,7 +431,7 @@ mod tests {
     }
 
     #[test]
-    fn the_candidates_are_ranked_readings_of_one_pitch() {
+    fn the_simplifications_are_ranked_readings_of_one_tempered_interval() {
         // Fifteen steps of 41et, where the simplest reading is not the most
         // convenient spelling: 9/7 costs three marks and means something, and
         // the runner up is spelled no better and means much less.
@@ -407,7 +439,7 @@ mod tests {
         let subgroup = notation.subgroup();
         let target = stack(&notation, 15);
 
-        let candidates = simplifier.candidates(&target, 3).unwrap();
+        let candidates = simplifier.simplifications_interval(&target, 3).unwrap();
         let ratios: Vec<(u64, u64)> = candidates
             .iter()
             .map(|candidate| subgroup.to_ratio(candidate).unwrap())
@@ -415,12 +447,18 @@ mod tests {
         assert_eq!(ratios, vec![(9, 7), (32, 25), (35, 27)]);
 
         // The first is what simplifying gives, the rest are ranked behind it,
-        // and every one of them is the same pitch to the temperament.
-        assert_eq!(candidates[0], simplifier.simplify(&target).unwrap());
-        let pitch = notation.temperament().map(&target).unwrap();
+        // and every one of them tempers to the same thing.
+        assert_eq!(
+            candidates[0],
+            simplifier.simplify_interval(&target).unwrap()
+        );
+        let tempered = notation.temperament().temper(&target).unwrap();
         let mut norms = Vec::new();
-        for candidate in simplifier.candidates(&target, usize::MAX).unwrap() {
-            assert_eq!(notation.temperament().map(&candidate).unwrap(), pitch);
+        for candidate in simplifier
+            .simplifications_interval(&target, usize::MAX)
+            .unwrap()
+        {
+            assert_eq!(notation.temperament().temper(&candidate).unwrap(), tempered);
             norms.push(sopfr(&candidate, subgroup.basis()));
         }
         assert!(norms.windows(2).all(|pair| pair[0] <= pair[1]));
@@ -428,8 +466,20 @@ mod tests {
         // The walk sees a few hundred of them, so asking for a handful is free
         // and asking for more than there are gives what there is.
         assert_eq!(norms.len(), 625);
-        assert_eq!(simplifier.candidates(&target, 900).unwrap().len(), 625);
-        assert_eq!(simplifier.candidates(&target, 0).unwrap().len(), 0);
+        assert_eq!(
+            simplifier
+                .simplifications_interval(&target, 900)
+                .unwrap()
+                .len(),
+            625
+        );
+        assert_eq!(
+            simplifier
+                .simplifications_interval(&target, 0)
+                .unwrap()
+                .len(),
+            0
+        );
     }
 
     #[test]
@@ -439,12 +489,14 @@ mod tests {
 
         assert!(simplifier.lattice().is_empty());
         let interval = subgroup.factorize(225, 224).unwrap();
-        assert_eq!(simplifier.simplify(&interval).unwrap(), interval);
+        assert_eq!(simplifier.simplify_interval(&interval).unwrap(), interval);
     }
 
     #[test]
-    fn the_coordinates_have_to_fit_the_subgroup() {
+    fn the_coordinates_have_to_fit() {
         let (_, simplifier) = simplifier(41, "2.3.5.7.11");
+        assert!(simplifier.simplify_interval(&[0, 0]).is_err());
         assert!(simplifier.simplify(&[0, 0]).is_err());
+        assert_eq!(simplifier.simplify(&[41]).unwrap(), vec![1, 0, 0, 0, 0]);
     }
 }

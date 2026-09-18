@@ -5,9 +5,9 @@
 //!   * there are exactly as many enharmonics as the notation has rank over the
 //!     temperament, and each is worth nothing without being the unison;
 //!   * every prime can be written, and reading the spelling back gives the
-//!     pitch it was asked for;
+//!     tempered interval it was asked for;
 //!   * no spelling in the same coset is cheaper to write - checked by walking
-//!     wider than `respell` does and writing the cost out a second time, so
+//!     wider than `spellings` does and writing the cost out a second time, so
 //!     that this checks the answer rather than restating how it was found;
 //!   * ranks run upwards one at a time, and the first has the rank of the
 //!     temperament where one of that rank exists at all.
@@ -45,8 +45,8 @@ fn main() {
     for subgroup in ["2.3.5", "2.3.5.7", "2.3.5.7.11"] {
         let subgroup: Subgroup = subgroup.parse().unwrap();
         for divisions in 5..=72 {
-            // A contorted equal temperament, such as 24et over 2.3.5, is
-            // refused rather than silently answered as a different one.
+            // An equal temperament that is not primitive, such as 24et over
+            // 2.3.5, is refused rather than silently answered as a different one.
             let Ok(t) = Temperament::equal(divisions, &subgroup) else {
                 continue;
             };
@@ -74,7 +74,7 @@ fn check(name: &str, t: &Temperament) -> usize {
         }
     };
 
-    let ranks: Vec<usize> = options.iter().map(Notation::rank).collect();
+    let ranks: Vec<usize> = options.iter().map(Notation::len).collect();
     if !ranks.windows(2).all(|pair| pair[1] == pair[0] + 1) {
         fail(format!("ranks do not run upwards one at a time: {ranks:?}"));
     }
@@ -94,16 +94,16 @@ fn check(name: &str, t: &Temperament) -> usize {
         // A written note worth nothing that is not the unison: that is the whole
         // of what an enharmonic is, and there are exactly as many of them as the
         // notation has rank over the temperament.
-        if n.enharmonics().len() != n.rank() - t.rank() {
+        if n.enharmonics().len() != n.len() - t.rank() {
             fail(format!(
-                "option {index}: {} enharmonics for a notation of rank {} over a rank {} temperament",
+                "option {index}: {} enharmonics for a notation of length {} over a rank {} temperament",
                 n.enharmonics().len(),
-                n.rank(),
+                n.len(),
                 t.rank()
             ));
         }
         for enharmonic in n.enharmonics() {
-            if n.pitch(enharmonic).unwrap().iter().any(|&x| x != 0) {
+            if n.temper(enharmonic).unwrap().iter().any(|&x| x != 0) {
                 fail(format!(
                     "option {index}: the enharmonic {enharmonic:?} is not worth nothing"
                 ));
@@ -113,18 +113,18 @@ fn check(name: &str, t: &Temperament) -> usize {
             }
         }
 
-        // Every prime can be written; reading the spelling back gives the pitch
+        // Every prime can be written; reading the spelling back gives the tempered interval
         // it was asked for; and nothing in the coset is cheaper to write. The
         // cost is written out again here, and the coset walked wider than
-        // `respell` walks it, so that this checks the answer rather than
+        // `spellings` walks it, so that this checks the answer rather than
         // restating how it was found.
         for prime in 0..n.dim() {
             let mut interval = vec![0i64; n.dim()];
             interval[prime] = 1;
-            let spelling = n.spell(&interval).unwrap();
-            if n.pitch(&spelling).unwrap() != t.map(&interval).unwrap() {
+            let spelling = n.spell_interval(&interval).unwrap();
+            if n.temper(&spelling).unwrap() != t.temper(&interval).unwrap() {
                 fail(format!(
-                    "option {index}: prime {prime} is spelled as another pitch"
+                    "option {index}: prime {prime} is spelled as another tempered interval"
                 ));
             }
             if let Some(better) = cheaper(n, &spelling) {
@@ -140,7 +140,7 @@ fn check(name: &str, t: &Temperament) -> usize {
     // Each notation in the run keeps one accidental more than the one before.
     for (index, pair) in options.windows(2).enumerate() {
         let (smaller, larger) = (&pair[0], &pair[1]);
-        if larger.rank() != smaller.rank() + 1 {
+        if larger.len() != smaller.len() + 1 {
             fail(format!(
                 "option {index} and the next differ by more than one"
             ));
@@ -158,14 +158,14 @@ fn check(name: &str, t: &Temperament) -> usize {
     failures
 }
 
-/// How far either way to walk each enharmonic, wider than `respell` does.
+/// How far either way to walk each enharmonic, wider than `spellings` does.
 const WIDTH: i64 = 8;
 
-/// A spelling of the same pitch that costs less than `spelling`, if there is one
+/// A spelling of the same tempered interval that costs less than `spelling`, if there is one
 /// within [`WIDTH`] enharmonics of it.
 ///
 /// Seven half-apotomes for an accidental mark and two for a fifth away from `D`,
-/// which is `Notation::respell`'s ranking spelled out a second time.
+/// which is `Notation::spellings`' ranking spelled out a second time.
 fn cheaper(n: &Notation, spelling: &[i64]) -> Option<Vec<i64>> {
     let cost = |c: &[i64]| -> i64 {
         let marks: i64 = c[2..].iter().map(|e| e.abs()).sum();
@@ -174,7 +174,7 @@ fn cheaper(n: &Notation, spelling: &[i64]) -> Option<Vec<i64>> {
     let lattice = n.enharmonics();
     let mut steps = vec![-WIDTH; lattice.len()];
     while !lattice.is_empty() {
-        let candidate: Vec<i64> = (0..n.rank())
+        let candidate: Vec<i64> = (0..n.len())
             .map(|slot| {
                 spelling[slot]
                     + steps

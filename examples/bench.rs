@@ -1,5 +1,5 @@
 //! Rough timings of the operations expected to run on a hot path: `simplify`,
-//! `candidates`, `spell`, `respell` and `to_just`. Building a `Notation` or a
+//! `simplifications`, `spell`, `spellings` and `to_interval`. Building a `Notation` or a
 //! `Simplifier` is not measured, since that happens once and is reused.
 
 use std::time::Instant;
@@ -31,52 +31,56 @@ fn main() {
         let notation = Notation::from_temperament(&temperament).unwrap();
         let simplifier = Simplifier::new(&temperament).unwrap();
         println!(
-            "notation rank {}, comma lattice rank {}",
-            notation.rank(),
+            "notation length {}, comma lattice rank {}",
+            notation.len(),
             simplifier.lattice().len()
         );
 
         // A spread of intervals, not just the unison, so the walk does real work.
         let intervals: Vec<Vec<i64>> = (0..divisions)
             .map(|ups| {
-                let mut spelling = vec![0; notation.rank()];
+                let mut spelling = vec![0; notation.len()];
                 spelling[2] = ups;
-                notation.to_just(&spelling).unwrap()
+                notation.to_interval(&spelling).unwrap()
             })
             .collect();
-        let coordinates: Vec<Vec<i64>> = intervals
+        let tempered: Vec<Vec<i64>> = intervals
             .iter()
-            .map(|interval| notation.spell(interval).unwrap())
+            .map(|interval| temperament.temper(interval).unwrap())
+            .collect();
+        let spellings: Vec<Vec<i64>> = tempered
+            .iter()
+            .map(|t| notation.spell(t).unwrap())
             .collect();
 
         let mut i = 0;
         time("Notation::spell", 10_000, || {
-            i = (i + 1) % intervals.len();
-            std::hint::black_box(notation.spell(&intervals[i]).unwrap());
+            i = (i + 1) % tempered.len();
+            std::hint::black_box(notation.spell(&tempered[i]).unwrap());
         });
 
         let mut i = 0;
-        time("Notation::respell(4)", 10_000, || {
-            i = (i + 1) % coordinates.len();
-            std::hint::black_box(notation.respell(&coordinates[i], 4).unwrap());
+        time("Notation::spellings(4)", 10_000, || {
+            i = (i + 1) % tempered.len();
+            std::hint::black_box(notation.spellings(&tempered[i], 4).unwrap());
         });
 
         let mut i = 0;
-        time("Notation::to_just", 1_000_000, || {
-            i = (i + 1) % coordinates.len();
-            std::hint::black_box(notation.to_just(&coordinates[i]).unwrap());
+        time("Notation::to_interval", 1_000_000, || {
+            i = (i + 1) % spellings.len();
+            std::hint::black_box(notation.to_interval(&spellings[i]).unwrap());
         });
 
         let mut i = 0;
         time("Simplifier::simplify", 10_000, || {
-            i = (i + 1) % intervals.len();
-            std::hint::black_box(simplifier.simplify(&intervals[i]).unwrap());
+            i = (i + 1) % tempered.len();
+            std::hint::black_box(simplifier.simplify(&tempered[i]).unwrap());
         });
 
         let mut i = 0;
-        time("Simplifier::candidates(8)", 10_000, || {
-            i = (i + 1) % intervals.len();
-            std::hint::black_box(simplifier.candidates(&intervals[i], 8).unwrap());
+        time("Simplifier::simplifications(8)", 10_000, || {
+            i = (i + 1) % tempered.len();
+            std::hint::black_box(simplifier.simplifications(&tempered[i], 8).unwrap());
         });
     }
 }

@@ -15,7 +15,10 @@ fn main() {
     let notation = Notation::from_temperament(&temperament).unwrap();
     let simplifier = Simplifier::new(&temperament).unwrap();
 
-    println!("41et over {subgroup}, notation of rank {}", notation.rank());
+    println!(
+        "41et over {subgroup}, notation of length {}",
+        notation.len()
+    );
     println!("comma lattice, reduced:");
     for comma in simplifier.lattice() {
         let ascending = subgroup.ascending(comma);
@@ -24,15 +27,15 @@ fn main() {
     println!("\nups  simplest  note");
 
     for ups in 0..=DIVISIONS {
-        let mut spelling = vec![0; notation.rank()];
+        let mut spelling = vec![0; notation.len()];
         spelling[2] = ups;
 
-        let stacked = notation.to_just(&spelling).unwrap();
-        let simplified = simplifier.simplify(&stacked).unwrap();
+        let stacked = notation.to_interval(&spelling).unwrap();
+        let simplified = simplifier.simplify_interval(&stacked).unwrap();
         println!(
             "{ups:3}  {:8}  {:6}",
             ratio(&subgroup, &simplified),
-            notation.note(&notation.spell(&simplified).unwrap()),
+            notation.note(&notation.spell_interval(&simplified).unwrap()),
         );
     }
 }

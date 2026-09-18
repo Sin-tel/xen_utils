@@ -42,7 +42,7 @@ fn main() {
         for divisions in 5..=99 {
             match Temperament::equal(divisions, &subgroup) {
                 Ok(t) => show(&format!("{divisions}et"), &t),
-                Err(_) => println!("{divisions}et {subgroup}: contorted"),
+                Err(_) => println!("{divisions}et {subgroup}: not primitive"),
             }
         }
     }
@@ -73,7 +73,7 @@ fn show(name: &str, t: &Temperament) {
                 let mut harmonic = vec![0i64; subgroup.dim()];
                 harmonic[index] = 1;
                 harmonic[0] = -(subgroup.to_cents(&harmonic) / 1200.0).floor() as i64;
-                let coordinates = n.spell(&harmonic).unwrap();
+                let coordinates = n.spell_interval(&harmonic).unwrap();
                 let marks: i64 = coordinates[2..].iter().map(|c| c.abs()).sum();
                 format!(
                     "{}={} ({marks})",
@@ -84,7 +84,7 @@ fn show(name: &str, t: &Temperament) {
             .collect();
         println!(
             "{name} {subgroup} {mark} [{}] {} | {} | {:?}",
-            n.rank(),
+            n.len(),
             accidentals.join(" "),
             spelling.join(" "),
             n.generators()

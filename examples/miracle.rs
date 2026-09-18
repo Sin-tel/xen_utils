@@ -35,7 +35,7 @@ fn main() {
                 } else {
                     " "
                 };
-                format!("{:6}", format!("[{}]{mark}", n.rank()))
+                format!("{:6}", format!("[{}]{mark}", n.len()))
             })
             .collect::<Vec<_>>()
             .join("  ")
@@ -43,10 +43,10 @@ fn main() {
 
     for steps in 0..=STEPS {
         let stacked: Vec<i64> = generator.iter().map(|&e| e * steps).collect();
-        let simplified = simplifier.simplify(&stacked).unwrap();
+        let simplified = simplifier.simplify_interval(&stacked).unwrap();
         let notes: Vec<String> = options
             .iter()
-            .map(|n| n.note(&n.spell(&simplified).unwrap()))
+            .map(|n| n.note(&n.spell_interval(&simplified).unwrap()))
             .collect();
 
         println!(
