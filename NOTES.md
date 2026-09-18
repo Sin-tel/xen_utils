@@ -250,26 +250,31 @@ under `sopfr`, one ball at a time out to `SEARCH_RADIUS`.
 
 ## Performance
 
-Built once, reused after, so constructing a `Notation` or a `Simplifier` is not a
-concern. `cargo run --release --example bench` times what runs repeatedly, on
-41et over `2.3.5.7.11`:
+`cargo bench` (criterion, `benches/notation.rs`) times what runs repeatedly,
+averaged over every step of the temperament. Per call:
 
 ```
-Notation::spell                 3.0 us
-Notation::spellings(4)          3.0 us
-Notation::to_interval            39 ns
-Simplifier::simplify             58 us
-Simplifier::simplifications(8)   56 us
+                                41et 2.3.5.7.11   72et 2.3.5.7.11   41et 2.3.5.7.11.13
+Notation::spell                     3.3 us            3.2 us             2.9 us
+Notation::spellings(4)              3.0 us            3.0 us             3.0 us
+Notation::spell_interval            3.0 us            3.0 us             3.0 us
+Notation::to_interval                38 ns             38 ns              39 ns
+Notation::temper                     34 ns             34 ns              34 ns
+Simplifier::simplify                 54 us             53 us             255 us
+Simplifier::simplifications(8)       52 us             52 us             254 us
+Notation::from_temperament          142 us            504 us             178 us
 ```
 
-`to_interval` is a matrix multiply and not worth a second thought; the bench's
-first block shows it at 185 ns, which is whatever the `spellings` loop before it
-leaves the allocator in, since the same call is 39 ns in the other two blocks.
+`to_interval` and `temper` are matrix multiplies and not worth a second thought.
 **`spell` is not free**: it is a diophantine solve, a closest vector and a box
 walked under `spelling_cost`. Still cheap enough to spell every visible note on a
 redraw - a hundred notes is a third of a millisecond - but not to be called in a
 loop that does not need it. `spellings` costs the same, since the solve and the
 closest vector are most of it.
+
+Building a notation is once per temperament, but `from_temperament` searches
+every subset of the accidentals and scores each, so it grows with them: 72et
+keeps three of three and is the slowest here at half a millisecond.
 
 It was 48 microseconds before two fixes. The first is the one
 `Simplifier::search` needed once: ranking a candidate cloned its coordinates to
@@ -393,4 +398,4 @@ Examples: `verify` sweeps the invariants and prints a failure count; `dump`
 prints a fingerprint of every notation to be diffed across a change; `notations`
 lays out each run; `simplifications` and `spellings` are the two questions;
 `spellings_width` sweeps how far `spellings` has to walk;
-`simplify` and `miracle` walk one temperament; `bench` times the hot path.
+`simplify` and `miracle` walk one temperament. `cargo bench` times the hot path.

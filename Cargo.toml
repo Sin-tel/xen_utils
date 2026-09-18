@@ -5,3 +5,10 @@ edition = "2024"
 
 [dependencies]
 diophantine = { git = "https://github.com/Sin-tel/diophantine", rev = "a4a7cbe" }
+
+[dev-dependencies]
+criterion = "0.8"
+
+[[bench]]
+name = "notation"
+harness = false
