@@ -13,99 +13,100 @@ pub(crate) struct NotationOptions<'a> {
 }
 
 impl<'a> NotationOptions<'a> {
+    /// Keeps the accidentals that can be of any use: not tempered out, and not
+    /// worth what an earlier one is worth, up to direction.
     pub(crate) fn new(
         temperament: &'a Temperament,
         accidentals: &[Accidental],
     ) -> Result<Self, Error> {
-        let derived: Matrix<i64> = accidentals.iter().map(|a| a.vector.clone()).collect();
-        let derived_images = temperament.map_all(&derived)?;
-        let useful: Vec<usize> = (0..derived.len())
-            .filter(|&index| !is_zero(&derived_images[index]))
-            .collect();
-
-        let filtered_accidentals: Vec<Accidental> =
-            useful.iter().map(|&i| accidentals[i].clone()).collect();
+        let vectors: Matrix<i64> = accidentals.iter().map(|a| a.vector.clone()).collect();
+        let images = temperament.map_all(&vectors)?;
+        let mut useful: Vec<usize> = Vec::new();
+        for index in 0..images.len() {
+            if is_zero(&images[index]) {
+                continue;
+            }
+            if useful
+                .iter()
+                .any(|&kept| equal_up_to_sign(&images[kept], &images[index]))
+            {
+                continue;
+            }
+            useful.push(index);
+        }
 
         Ok(NotationOptions {
             temperament,
-            accidentals: filtered_accidentals,
-            images: select(&derived_images, &useful),
+            accidentals: useful.iter().map(|&i| accidentals[i].clone()).collect(),
+            images: select(&images, &useful),
         })
     }
 
-    /// Every notation the temperament offers, smallest first.
+    /// The best notation of each size, smallest first.
     pub(crate) fn search(&self) -> Result<Vec<Notation>, Error> {
-        let candidates = self.candidates();
-        let necessary = self.necessary(&candidates)?;
+        let mut found = Vec::new();
+        for size in 0..=self.accidentals.len() {
+            if let Some(notation) = self.best_of_size(size)? {
+                found.push(notation);
+            }
+        }
+        if found.is_empty() {
+            return Err(self.nothing_spans());
+        }
+        Ok(found)
+    }
 
-        // All other ones are optional, unless they map to the same interval
-        // as one before it.
-        let mut optional: Vec<usize> = Vec::new();
-        for index in candidates {
-            if necessary.contains(&index) {
+    /// The best notation keeping exactly `size` of the accidentals.
+    pub(crate) fn with_count(&self, size: usize) -> Result<Notation, Error> {
+        self.best_of_size(size)?.ok_or_else(|| {
+            Error::Unsupported(format!(
+                "no notation of this temperament keeps exactly {size} of these accidentals"
+            ))
+        })
+    }
+
+    /// The best notation keeping exactly `size` of the accidentals, if any.
+    ///
+    /// Ranked by how many primes are off their nominals, then by the total cost
+    /// of writing the primes on their nominals, then by those costs one prime at
+    /// a time, lowest prime first. Where all of that ties, the subset that comes
+    /// first in the order the accidentals were given wins.
+    fn best_of_size(&self, size: usize) -> Result<Option<Notation>, Error> {
+        let mut best: Option<(Score, Notation)> = None;
+        for subset in subsets(&(0..self.accidentals.len()).collect::<Vec<_>>(), size) {
+            if !self.valid(&subset)? {
                 continue;
             }
-            let mut present = necessary.iter().chain(&optional);
-            if !present.any(|&kept| equal_up_to_sign(&self.images[kept], &self.images[index])) {
-                optional.push(index);
+            let kept: Vec<Accidental> = subset.iter().map(|&i| self.accidentals[i].clone()).collect();
+            let notation = Notation::from_accidentals(self.temperament, &kept)?;
+            let score = Score::of(&notation)?;
+            if best.as_ref().is_none_or(|(held, _)| score < *held) {
+                best = Some((score, notation));
             }
         }
-
-        (0..=optional.len())
-            .map(|extras| {
-                // The accidentals kept by the notation that has taken on `extras` of the optional ones, in order.
-                let mut keep: Vec<usize> = necessary
-                    .iter()
-                    .chain(&optional[..extras])
-                    .copied()
-                    .collect();
-                keep.sort_unstable();
-                let keep_accs: Vec<Accidental> =
-                    keep.iter().map(|&i| self.accidentals[i].clone()).collect();
-                Notation::from_accidentals(self.temperament, &keep_accs)
-            })
-            .collect()
+        Ok(best.map(|(_, notation)| notation))
     }
 
-    fn candidates(&self) -> Vec<usize> {
-        if self.temperament.rank() != 1 {
-            return (0..self.accidentals.len()).collect();
+    /// Whether the accidentals at `keep` make a notation at all.
+    ///
+    /// They must reach every pitch together with the octave and the fifth. An
+    /// equal temperament must also keep one worth a single step if it keeps any:
+    /// with no symbol for a single step, single steps can only be reached by
+    /// walking the fifth chain, which is not how anyone writes one.
+    fn valid(&self, keep: &[usize]) -> Result<bool, Error> {
+        if self.temperament.rank() == 1
+            && !keep.is_empty()
+            && !keep.iter().any(|&i| self.images[i][0].abs() == 1)
+        {
+            return Ok(false);
         }
-        // For an equal temperament, we first look for an accidental that maps to
-        // one step, since that one is preferred over all others.
-        let step = (0..self.accidentals.len()).find(|&index| self.images[index][0].abs() == 1);
-        match step {
-            Some(step) => std::iter::once(step)
-                .chain((0..self.accidentals.len()).filter(|&index| index != step))
-                .collect(),
-            None => Vec::new(),
-        }
-    }
-
-    /// The smallest subset of `candidates` that makes a notation possible at all.
-    fn necessary(&self, candidates: &[usize]) -> Result<Vec<usize>, Error> {
-        for size in 0..=candidates.len() {
-            // Subsets in lexicographic order, so that the accidentals offered
-            // first are the ones kept where there is a choice.
-            for subset in subsets(candidates, size) {
-                if self.spans(&subset)? {
-                    return Ok(subset);
-                }
-            }
-        }
-        Err(self.nothing_spans())
-    }
-
-    /// Whether the octave, the fifth and the accidentals at `keep` reach every
-    /// pitch of the temperament.
-    fn spans(&self, keep: &[usize]) -> Result<bool, Error> {
         let mut generators = fifth_chain(self.temperament.dim());
         generators.extend(keep.iter().map(|&i| self.accidentals[i].vector.clone()));
         let images = self.temperament.map_all(&generators)?;
         Ok(spans(&images, self.temperament.rank()))
     }
 
-    /// Why no subset of the candidates reaches every pitch.
+    /// Why no subset of the accidentals reaches every pitch.
     fn nothing_spans(&self) -> Error {
         let subgroup = self.temperament.subgroup();
         if self.temperament.rank() == 1 {
@@ -117,6 +118,47 @@ impl<'a> NotationOptions<'a> {
             "the octave, the fifth and the accidentals of {subgroup} do not reach every pitch of this rank {} temperament",
             self.temperament.rank()
         ))
+    }
+}
+
+/// How a notation ranks against others of its size, lower being better.
+/// Compared field by field, in order.
+#[derive(PartialEq, Eq)]
+struct Score {
+    /// How many primes are off their nominals.
+    failures: usize,
+    /// The total cost of writing every prime on its nominal, or `None` where
+    /// some prime cannot be, which is worse than any cost.
+    total: Option<i64>,
+    /// The cost of each prime on its nominal, where one that cannot be is last.
+    costs: Vec<i64>,
+}
+
+impl Score {
+    fn of(notation: &Notation) -> Result<Self, Error> {
+        let verdict = notation.nominal_verdict()?;
+        Ok(Score {
+            failures: verdict.failures,
+            total: verdict.costs.iter().copied().sum::<Option<i64>>(),
+            costs: verdict.costs.iter().map(|c| c.unwrap_or(i64::MAX)).collect(),
+        })
+    }
+}
+
+impl PartialOrd for Score {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Score {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // `None` sorts first for `Option`, and here it has to sort last.
+        let total = |s: &Score| s.total.unwrap_or(i64::MAX);
+        self.failures
+            .cmp(&other.failures)
+            .then(total(self).cmp(&total(other)))
+            .then_with(|| self.costs.cmp(&other.costs))
     }
 }
 

@@ -101,24 +101,77 @@ Ties fall back to the coordinates, so the order never depends on how the search
 was walked. The octave does not appear: register costs nothing to write, and the
 pitch fixes it once the rest is chosen.
 
+## Nominals are degrees
+
+Give a written note a **degree**, the number of letters it sits up:
+`7 * octaves + 4 * fifths`, and nothing for an accidental. A sharp is seven
+fifths less four octaves, degree zero, so it keeps the letter too.
+
+Just intonation gives each prime a degree of its own, and together those are a
+linear map from interval vectors to degrees, `D = (7, 11, 16, 20, 24, 26, ..)`.
+Its kernel holds `2187/2048` and every derived accidental, which is exactly why
+those keep the letter.
+`just_nominals` has it, with what the just spelling costs.
+
+A prime is **on its nominal** when it is written at degree exactly `D(p)`.
+Exactly, not modulo seven: in 41et `E##########` has the letter of `5/4` but
+sits an octave below it.
+
+`nominal_spellings` is the cheapest spelling of each prime at its just degree,
+or `None` where no spelling of that pitch has that degree, and `nominal_costs`
+what those cost. Spellings at a fixed
+degree differ by the degree-zero enharmonics, so it is its own closest vector
+search on that slice - it does not read what `spell` happened to pick.
+
+A pitch can be written at `d + g Z`, `g` the gcd of the enharmonics' degrees.
+Where `g > 1` (41et's fifth chain, `g = 4`) or no enharmonic moves the degree
+(schismatic's), some letters are out of reach and the question has teeth. Where
+`g = 1` every letter is reachable and only the cost tells notations apart.
+
+**`keeps_nominals`**: every prime can be written on its nominal at a cost no
+worse than either just intonation spends on it or this notation spends on its
+cheapest spelling of it. The first half lets 41et's largest notation keep `vBb`
+though `tA` is cheaper; the second lets 41et's middle one write `11/8` as `^^F`,
+two marks where just intonation has one, because it has nothing better.
+
+Only an accidental's image affects any of this. The ratio names it and is what
+`to_just` reads back; in 41et `49/48` is as good a step as `81/80`, though just
+intonation writes `49/48` on `D`, so `to_just(^C)` is letter-inconsistent.
+
 ## The search: which accidentals to keep
 
-That is all `NotationOptions` decides.
-
-Each accidental falls into one of four classes:
+That is all `NotationOptions` decides. Before searching it drops an accidental:
 
 - **tempered out** - the temperament maps it to zero, so it would raise by
-  nothing. Never kept.
-- **passed over** - worth exactly what an accidental already kept is worth, up to
+  nothing.
+- **passed over** - worth exactly what an earlier accidental is worth, up to
   direction, so it would be that accidental over again. `81/80` and `64/63` being
-  one interval is a property of 41et, not a second symbol to read. Never kept.
-- **necessary** - the smallest subset of what is left that reaches every pitch at
-  all. Always kept. A lexicographic subset search, so the accidentals offered
-  first are kept where there is a choice.
-- **optional** - the rest. The run takes them on one at a time.
+  one interval is a property of 41et, not a second symbol to read.
 
-`Notation::options` is the run from keeping only the necessary ones to keeping
-them all.
+Every subset of the rest is a candidate, if it reaches every pitch at all. Of
+each size the best is the one with
+
+1. the fewest primes failing `keeps_nominals`,
+2. then the lowest total of `nominal_costs`, a prime that cannot reach its
+   nominal at all counting as worse than any cost,
+3. then those costs compared one prime at a time, lowest prime first,
+4. then the subset first in the order the accidentals were given.
+
+`Notation::options` is the best of each size, smallest first, and
+`Notation::with_count` the best of one size. The best of one size need not keep
+what the best of the size below keeps; on everything `verify` sweeps it does,
+and `verify` prints it where not.
+
+Miracle is where the ranking earns its keep. Its octave and fifth leave a
+quotient of `Z/6`, six generators to the fifth, and `81/80` is one generator,
+`64/63` two and `33/32` three: `64/63` alone reaches only half the pitches. Every
+single accidental leaves 7 and 11 off their nominals, and the pairs tie three
+ways on a total of 46, each writing one of 5, 7 and 11 with two marks. The
+lower primes win, so it is `81/80 64/63` and `11/8 = ^>F`.
+
+The candidates are the derived accidentals, or a list supplied to
+`options_with`. Searching wider was tried in a scratch example and turned up
+nothing better on miracle or marvel; supplying the list is the way to ask.
 
 ### The one place rank 1 is singled out
 
@@ -138,10 +191,9 @@ over `2.3.5.11` its quartertone is `33/32`, worth exactly one step.
 
 ## Which notation to recommend
 
-`from_temperament` returns **the smallest notation that keeps every nominal**:
-one where each prime is written on the letter just intonation gives it. Each
-further accidental is another symbol to read, so smaller is better - but not at
-the price of moving a prime onto another letter.
+`from_temperament` returns **the smallest notation that keeps every nominal**.
+Each further accidental is another symbol to read, so smaller is better - but not
+at the price of moving a prime onto another letter.
 
 41et is the case that makes it obvious:
 
@@ -151,19 +203,14 @@ the price of moving a prime onto another letter.
    [4]  81/80 33/32     5/4 vE5   7/4 tA5    11/8 tF5
 ```
 
-`[2]` has all three primes off their nominals. `[4]` only turns two marks into
+`[2]` cannot reach any of the three nominals. `[4]` only turns two marks into
 one of another kind, so `[3]` is the one wanted.
 
-**Sharps and flats do not count**, since seven fifths leave the letter alone.
-Flattone writes `11/8` as `F#5` where just intonation has `tF5`, and that is
-still an `F`, so there is no reason to take on an accidental for 11.
-
-Where nothing qualifies the recommendation falls back to the first notation.
-
-**This rule is the weakest thing in the library.** Nothing stops a notation
-keeping its nominals by stacking a pile of marks, and nothing says the smallest
-notation that manages it is the one anyone wants. It happens not to go wrong on
-anything in the list, which is not the same as being right.
+Where nothing qualifies the recommendation falls back to the first notation. On
+the data files that no longer happens for any named temperament: semaphore,
+diaschismic with 17 and pele each had a cheaper spelling off the nominal than on
+it, and the old rule, reading only `spell`, took that as a miss. Swept against
+the old rule, the new one agrees everywhere the old one found anything.
 
 ## Simplifying
 
@@ -241,12 +288,12 @@ away from `225/224`.
   are the same note and `F#` is simpler. Where the cheapest symbol carries the
   wrong harmonic hint this is taste, and there is no rule underneath it: `spell`
   is handed a pitch, not a prime, so it cannot prefer the accidental belonging to
-  what is being written.
-- **The recommendation is the weakest rule here.** See above.
-- **Making `keeps_nominals` follow the accidental is vacuous**, though it looks
-  like the fix. Asking for the prime on the letter the chain gives *plus*
-  wherever this notation writes the accidental itself is a condition `spell`
-  satisfies almost automatically, and 41et then recommends its bottom notation.
+  what is being written. `nominal_costs` is where intent shows: it asks for the
+  prime on its letter, whatever `spell` would choose.
+- **The recommendation is still a rule, not a proof.** It agrees with every
+  earlier answer and has no weight in it, but it reads only the primes. An
+  interval such as `7/5` could be off its nominal in a notation that keeps every
+  prime on its own.
 - **The simplifier is a local search, not a proof.** `SEARCH_RADIUS` is 2, and
   the note on it records that a radius of 2 walks as far as a radius of 3 for
   every interval within nineteen generators of the unison. A radius of 1 is
@@ -286,19 +333,17 @@ away from `225/224`.
   treats the accidentals as an opaque list. Handed Johnston's pair, `81/80` and
   the septimal `36/35`, it builds and spells correctly: `7/4` comes out
   `[2, -2, 1, -1]`, which is `16/9` raised a syntonic comma and lowered a
-  `36/35`. Four things would need doing:
+  `36/35`. What needed doing:
   - **Symbols.** Done: an `Accidental` carries its own symbols.
-  - **`keeps_nominals`**, hence the recommendation: `just_nominal` needs to know
-    which prime an accidental corrects and by how many fifths, and a mixed-axis
-    accidental has no single answer.
+  - **`keeps_nominals`**, hence the recommendation. Done: nominals are degrees,
+    a property of the subgroup, and an accidental's ratio never enters.
   - **The half-apotome bound is unenforced** on a supplied accidental, and
     deliberately so: `27/26` is a common accidental for 13 and breaks it. But
     `spelling_cost` charging seven per mark is only sound because of it, so the
     weights may need revisiting for such notations.
-  - `Search::new` and `from_ji` taking a supplied list: done, as
-    `options_with` and `from_temperament_with`.
+  - Supplying a list: done, as `options_with`, `from_temperament_with` and
+    `with_count`.
 
-  Nothing in the core moved.
 - **An equal temperament sweep is a coverage test, not a judgement.**
   Temperaments can be arbitrarily bad and most of what a sweep turns up is
   nobody's notation. It catches panics and shows what a rule change moved; for
@@ -308,10 +353,10 @@ away from `225/224`.
 ## Where the code lives
 
 - `notation.rs` - the `Notation` type: `generators`, `pitch`, `enharmonics`,
-  `spell`, `respell`, `note`, the ranking `spelling_cost`, and the derivation of a
-  single accidental.
-- `notation_options.rs` - `Notation::options`, and only the choice of which accidentals to
-  keep. Tested through `options`.
+  `spell`, `respell`, `note`, `nominal_costs` and `keeps_nominals`, the ranking
+  `spelling_cost`, the degree map, and the derivation of a single accidental.
+- `notation_options.rs` - `Notation::options` and `with_count`: the subset
+  search and its ranking. Tested through `options`.
 - `simplify.rs` - `Simplifier`: the comma lattice reduced once, then a seeded
   walk per interval.
 - `temperament.rs`, `primes.rs`, `util.rs` - the temperament, the subgroup, and

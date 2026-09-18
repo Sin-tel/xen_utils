@@ -1,5 +1,9 @@
 //! Lists every notation each temperament in `data/temperaments.txt` offers,
-//! and how each one spells the primes it tempers.
+//! and how each one writes the primes it tempers.
+//!
+//! Each prime is written on its just nominal, `-` where it cannot be, followed
+//! in parentheses by what `spell` chooses where that is something else. The
+//! recommended notation is marked `->`.
 
 use std::error::Error;
 
@@ -7,7 +11,7 @@ use xen_utils::{Notation, Subgroup, Temperament};
 
 const TEMPERAMENTS: &str = include_str!("../data/temperaments.txt");
 
-const HEADER: [&str; 5] = ["temperament", "subgroup", "rank", "accidentals", "spelling"];
+const HEADER: [&str; 6] = ["temperament", "subgroup", "rank", "", "accidentals", "on the nominals"];
 
 fn main() {
     let mut rows = vec![HEADER.map(String::from)];
@@ -28,7 +32,7 @@ fn main() {
 
 /// Parses one line of the list and lays out every notation it offers, one row
 /// each, naming the temperament only on the first.
-fn rows_for(line: &str) -> Result<Vec<[String; 5]>, Box<dyn Error>> {
+fn rows_for(line: &str) -> Result<Vec<[String; 6]>, Box<dyn Error>> {
     let mut fields = line.split('|').map(str::trim);
     let (Some(name), Some(subgroup), Some(definition), None) =
         (fields.next(), fields.next(), fields.next(), fields.next())
@@ -47,11 +51,14 @@ fn rows_for(line: &str) -> Result<Vec<[String; 5]>, Box<dyn Error>> {
                 name.to_string(),
                 subgroup.to_string(),
                 temperament.rank().to_string(),
+                String::new(),
                 "-".to_string(),
                 error.to_string(),
             ]]);
         }
     };
+
+    let recommended = Notation::from_temperament(&temperament)?;
 
     Ok(options
         .iter()
@@ -71,6 +78,11 @@ fn rows_for(line: &str) -> Result<Vec<[String; 5]>, Box<dyn Error>> {
                 },
                 if first {
                     temperament.rank().to_string()
+                } else {
+                    String::new()
+                },
+                if notation.generators() == recommended.generators() {
+                    "->".to_string()
                 } else {
                     String::new()
                 },
@@ -118,15 +130,30 @@ fn parse_temperament(definition: &str, subgroup: &Subgroup) -> Result<Temperamen
     Ok(Temperament::from_commas(&commas, subgroup)?)
 }
 
-/// The rank of a notation and how it spells each prime beyond 3.
+/// The rank of a notation and how it writes each prime beyond 3 on its
+/// nominal, with what `spell` chooses where that differs.
 fn spelling(notation: &Notation) -> String {
     let subgroup = notation.subgroup();
+    let nominal = notation.nominal_spellings().expect("every prime has an accidental");
     let mut cell = format!("[{}]", notation.rank());
-    for index in 2..subgroup.dim() {
+    for (index, on_nominal) in (2..subgroup.dim()).zip(nominal) {
         let harmonic = octave_reduce(subgroup, index);
         let (num, den) = subgroup.to_ratio(&harmonic).expect("a single prime fits");
-        let coordinates = notation.spell(&harmonic).expect("built over subgroup");
-        cell.push_str(&format!(" {num}/{den} {}", notation.note(&coordinates)));
+        let spelled = notation.spell(&harmonic).expect("built over subgroup");
+        // The nominal spelling is of the prime itself, so bring it down by the
+        // same octaves the harmonic was.
+        let on_nominal = on_nominal.map(|mut coordinates| {
+            coordinates[0] += harmonic[0];
+            coordinates
+        });
+        let written = match &on_nominal {
+            Some(coordinates) => notation.note(coordinates),
+            None => "-".to_string(),
+        };
+        cell.push_str(&format!(" {num}/{den} {written}"));
+        if on_nominal.as_ref() != Some(&spelled) {
+            cell.push_str(&format!(" ({})", notation.note(&spelled)));
+        }
     }
     cell
 }
@@ -140,8 +167,8 @@ fn octave_reduce(subgroup: &Subgroup, index: usize) -> Vec<i64> {
 }
 
 /// Prints rows padded to a common width, with a rule under the header.
-fn print_table(rows: &[[String; 5]]) {
-    let mut widths = [0; 5];
+fn print_table(rows: &[[String; 6]]) {
+    let mut widths = [0; 6];
     for row in rows {
         for (width, cell) in widths.iter_mut().zip(row) {
             *width = (*width).max(cell.chars().count());

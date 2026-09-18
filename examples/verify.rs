@@ -9,9 +9,11 @@
 //!   * no spelling in the same coset is cheaper to write - checked by walking
 //!     wider than `respell` does and writing the cost out a second time, so
 //!     that this checks the answer rather than restating how it was found;
-//!   * ranks run upwards one at a time, each notation keeping everything the
-//!     one before it kept, and the first has the rank of the temperament where
-//!     one of that rank exists at all.
+//!   * ranks run upwards one at a time, and the first has the rank of the
+//!     temperament where one of that rank exists at all.
+//!
+//! The best notation of one size need not keep what the best of the size below
+//! keeps. Where it does not, that is printed, but it is not a failure.
 
 use std::error::Error;
 
@@ -135,8 +137,7 @@ fn check(name: &str, t: &Temperament) -> usize {
         }
     }
 
-    // Each notation in the run keeps one accidental more than the one before,
-    // and keeps everything the one before it kept.
+    // Each notation in the run keeps one accidental more than the one before.
     for (index, pair) in options.windows(2).enumerate() {
         let (smaller, larger) = (&pair[0], &pair[1]);
         if larger.rank() != smaller.rank() + 1 {
@@ -146,10 +147,10 @@ fn check(name: &str, t: &Temperament) -> usize {
         }
         for accidental in &smaller.generators()[2..] {
             if !larger.generators()[2..].contains(accidental) {
-                fail(format!(
-                    "option {} drops an accidental option {index} keeps",
+                println!(
+                    "{name}: option {} drops an accidental option {index} keeps",
                     index + 1
-                ));
+                );
             }
         }
     }

@@ -116,18 +116,19 @@ impl Notation {
             .clone())
     }
 
-    /// Every notation `temperament` offers, smallest first.
+    /// The best notation `temperament` offers of each size, smallest first.
     ///
-    /// The first is the smallest notation there is, and the last keeps every
-    /// accidental that is useful.
+    /// Every subset of the accidentals is a candidate. An accidental tempered
+    /// out is never kept, nor one worth what an earlier accidental is worth,
+    /// up to direction: in 41et `64/63` is worth what `81/80` is. A subset
+    /// must reach every pitch, and an equal temperament keeping any accidental
+    /// must keep one worth a single step.
     ///
-    /// An accidental tempered out by the temperament is always dropped, and so are
-    /// accidentals that map to the same pitch as earlier accidentals.
-    /// Example: in 41 equal temperament, `81/80` and `64/63`, so the second is
-    /// dropped.
-    /// Of the rest, the smallest set that lets the notation reach every pitch at all is
-    /// *necessary* and is always kept; the remainder are *optional*, and the
-    /// options enable them one at a time.
+    /// Of each size the best is the one with fewest primes off their nominals
+    /// (see [`keeps_nominals`](Self::keeps_nominals)), then the lowest total
+    /// [`nominal_costs`](Self::nominal_costs), then those costs compared one
+    /// prime at a time, lowest first. The best of one size need not keep what
+    /// the best of the size below keeps.
     ///
     /// # Errors
     /// Returns [`Error::Unsupported`] if some prime has no accidental, or if
@@ -138,12 +139,25 @@ impl Notation {
         Self::options_with(temperament, &derive_accidentals(temperament.subgroup())?)
     }
 
-    /// Every notation `temperament` offers with the given `accidentals`, smallest first.
+    /// [`options`](Self::options) over the given `accidentals`.
     pub fn options_with(
         temperament: &Temperament,
         accidentals: &[Accidental],
     ) -> Result<Vec<Self>, Error> {
         NotationOptions::new(temperament, accidentals)?.search()
+    }
+
+    /// The best notation of `temperament` keeping exactly `count` of
+    /// `accidentals`, ranked as [`options`](Self::options) ranks them.
+    ///
+    /// # Errors
+    /// Returns [`Error::Unsupported`] if no `count` of them make a notation.
+    pub fn with_count(
+        temperament: &Temperament,
+        accidentals: &[Accidental],
+        count: usize,
+    ) -> Result<Self, Error> {
+        NotationOptions::new(temperament, accidentals)?.with_count(count)
     }
 
     /// Builds the notation of `temperament` with `accidentals` as its extra
@@ -286,73 +300,99 @@ impl Notation {
         width: i64,
     ) -> Result<Vec<Vec<i64>>, Error> {
         self.check(coordinates)?;
-        if self.enharmonics.is_empty() {
-            return Ok(vec![coordinates.to_vec()]);
-        }
-
-        // `solve_diophantine` hands back an arbitrary vector, so reduce first.
-        let mut centre = coordinates.to_vec();
-        centre[1] -= NOMINAL_CENTRE;
-        let seed: Vec<i64> = match cvp_exact(&centre, &self.enharmonics, &self.weights) {
-            Ok(near) => coordinates.iter().zip(near).map(|(a, b)| a - b).collect(),
-            Err(_) => coordinates.to_vec(),
-        };
-
-        let mut found = Vec::new();
-        let mut candidate = vec![0; self.rank()];
-        let mut steps = vec![-width; self.enharmonics.len()];
-        loop {
-            for slot in 0..self.rank() {
-                candidate[slot] = seed[slot]
-                    + steps
-                        .iter()
-                        .zip(&self.enharmonics)
-                        .map(|(&step, row)| step * row[slot])
-                        .sum::<i64>();
-            }
-            found.push(candidate.clone());
-
-            let mut place = 0;
-            while place < steps.len() && steps[place] == width {
-                steps[place] = -width;
-                place += 1;
-            }
-            if place == steps.len() {
-                break;
-            }
-            steps[place] += 1;
-        }
-
-        // Compared rather than keyed, so that ranking a candidate does not clone
-        // its coordinates to break the tie with.
-        found.sort_unstable_by(|a, b| {
-            spelling_cost(a)
-                .cmp(&spelling_cost(b))
-                .then_with(|| spelling_break_ties(a).cmp(&spelling_break_ties(b)))
-                .then_with(|| a.cmp(b))
-        });
-        found.dedup();
-        found.truncate(count.max(1));
-        Ok(found)
+        Ok(cheapest(
+            coordinates,
+            &self.enharmonics,
+            &self.weights,
+            width,
+            count,
+        ))
     }
 
-    /// Whether every prime is written on the nominal just intonation gives it.
+    /// The cheapest way to write each prime beyond 3 on its just nominal: at
+    /// the degree just intonation gives it, or `None` where no spelling of its
+    /// pitch has that degree.
+    ///
+    /// The degree is exact rather than modulo the seven nominals: a note ten
+    /// sharps up an octave lower is not on the nominal, though its letter is.
+    ///
+    /// This asks for the prime on its letter, whatever [`spell`](Self::spell)
+    /// would choose: 41et's largest notation spells `7/4` as `tA`, but writes
+    /// it on its nominal as `vBb`.
+    ///
+    /// # Errors
+    /// Returns [`Error::Unsupported`] if some prime has no accidental.
+    pub fn nominal_spellings(&self) -> Result<Vec<Option<Vec<i64>>>, Error> {
+        // The notation coordinates and their degree side by side, so that one
+        // solve finds a spelling of the right pitch at the right degree.
+        let with_degree: Matrix<i64> = self
+            .images
+            .iter()
+            .enumerate()
+            .map(|(index, image)| {
+                let mut row = image.clone();
+                row.push(GENERATOR_DEGREES.get(index).copied().unwrap_or(0));
+                row
+            })
+            .collect();
+        // The enharmonics that keep the degree, reduced for the search.
+        let level = kernel_left(&with_degree)?;
+        let level = lll(&level, LLL_DELTA, &self.weights).unwrap_or(level);
+
+        let mut spellings = Vec::new();
+        for (index, nominal) in (2..self.dim()).zip(just_nominals(self.subgroup())?) {
+            let mut prime = vec![0i64; self.dim()];
+            prime[index] = 1;
+            let mut target = self.temperament.map(&prime)?;
+            target.push(nominal.degree);
+            let spelling = solve_diophantine(&transpose(&with_degree), &column(&target))
+                .ok()
+                .map(|solution| {
+                    let seed = first_column(&solution);
+                    cheapest(&seed, &level, &self.weights, RESPELL_WIDTH, 1).remove(0)
+                });
+            spellings.push(spelling);
+        }
+        Ok(spellings)
+    }
+
+    /// What [`nominal_spellings`](Self::nominal_spellings) cost to read.
+    ///
+    /// # Errors
+    /// Returns [`Error::Unsupported`] if some prime has no accidental.
+    pub fn nominal_costs(&self) -> Result<Vec<Option<i64>>, Error> {
+        Ok(self
+            .nominal_spellings()?
+            .iter()
+            .map(|spelling| spelling.as_deref().map(spelling_cost))
+            .collect())
+    }
+
+    /// Whether every prime beyond 3 can be written on the nominal just
+    /// intonation gives it, at a cost no worse than either just intonation
+    /// spends on it or this notation spends on its cheapest spelling of it.
     ///
     /// # Errors
     /// Returns [`Error::Unsupported`] if some prime has no accidental.
     pub fn keeps_nominals(&self) -> Result<bool, Error> {
-        let nominals = NOMINALS.len() as i64;
-        for index in 2..self.dim() {
-            let accidental = derive_accidental_vector(self.subgroup(), index)?;
+        Ok(self.nominal_verdict()?.failures == 0)
+    }
+
+    /// [`nominal_costs`](Self::nominal_costs), and how many primes fail
+    /// [`keeps_nominals`](Self::keeps_nominals).
+    pub(crate) fn nominal_verdict(&self) -> Result<NominalVerdict, Error> {
+        let costs = self.nominal_costs()?;
+        let nominals = just_nominals(self.subgroup())?;
+        let mut failures = 0;
+        for ((index, cost), nominal) in (2..self.dim()).zip(&costs).zip(nominals) {
             let mut prime = vec![0i64; self.dim()];
             prime[index] = 1;
-
-            let wanted = just_nominal(&accidental, index);
-            if self.spell(&prime)?[1].rem_euclid(nominals) != wanted {
-                return Ok(false);
+            let best = spelling_cost(&self.spell(&prime)?);
+            if cost.is_none_or(|cost| cost > best.max(nominal.cost)) {
+                failures += 1;
             }
         }
-        Ok(true)
+        Ok(NominalVerdict { costs, failures })
     }
 
     /// Converts notation coordinates back to just interval.
@@ -430,16 +470,56 @@ pub(crate) fn fifth_chain(dim: usize) -> Matrix<i64> {
     vec![octave, fifth]
 }
 
-/// The nominal just intonation gives the prime at `index`, as a position on the
-/// fifth chain modulo the seven nominals.
+/// How well a notation keeps its nominals.
+pub(crate) struct NominalVerdict {
+    /// [`Notation::nominal_costs`].
+    pub(crate) costs: Vec<Option<i64>>,
+    /// How many primes fail [`Notation::keeps_nominals`].
+    pub(crate) failures: usize,
+}
+
+/// Where just intonation writes a prime: its degree, and what that costs.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct JustNominal {
+    /// Letters up from the unison, seven to the octave.
+    pub(crate) degree: i64,
+    /// [`spelling_cost`] of the just spelling.
+    pub(crate) cost: i64,
+}
+
+/// The degree of the octave and the fifth. Every accidental has degree zero.
+const GENERATOR_DEGREES: [i64; 2] = [7, 4];
+
+/// The degree of notation coordinates: how many letters up they sit.
+pub(crate) fn degree(coordinates: &[i64]) -> i64 {
+    GENERATOR_DEGREES
+        .iter()
+        .zip(coordinates)
+        .map(|(d, c)| d * c)
+        .sum()
+}
+
+/// Where just intonation writes each prime beyond 3.
 ///
-/// Just intonation spells a prime as its own accidental on top of a stretch of
-/// the fifth chain. The accidental `a` has exponent `s = +-1` on the prime
-/// itself, so `p = s * a - s * a[1] fifths - .. octaves`, which puts the prime
-/// `-s * a[1]` fifths along. The syntonic comma has `s = -1` and four threes, so
-/// just intonation spells 5 four fifths up, on `E`.
-fn just_nominal(accidental: &[i64], index: usize) -> i64 {
-    (-accidental[index] * accidental[1]).rem_euclid(NOMINALS.len() as i64)
+/// Just intonation writes a prime as its own accidental on top of a stretch of
+/// the fifth chain. The accidental `a` has exponent `s = +-1` on the prime, so
+/// the prime is `s * a` less `s * a[1]` threes and `s * a[0]` twos: the fifth
+/// coordinate `-s * a[1]`, the octave coordinate `-s * (a[0] + a[1])` and one
+/// mark. Together with 7 for the octave and 11 for the three, these degrees
+/// are a linear map from interval vectors to degrees, `(7, 11, 16, 20, 24, ..)`,
+/// whose kernel holds the apotome and every derived accidental.
+pub(crate) fn just_nominals(subgroup: &Subgroup) -> Result<Vec<JustNominal>, Error> {
+    (2..subgroup.dim())
+        .map(|index| {
+            let a = derive_accidental_vector(subgroup, index)?;
+            let s = a[index];
+            let spelling = [-s * (a[0] + a[1]), -s * a[1], 1];
+            Ok(JustNominal {
+                degree: degree(&spelling),
+                cost: spelling_cost(&spelling),
+            })
+        })
+        .collect()
 }
 
 /// Derives the default accidentals for a subgroup.
@@ -557,6 +637,68 @@ const COST_MARK: i64 = 7;
 fn spelling_cost(coordinates: &[i64]) -> i64 {
     let marks: i64 = coordinates[2..].iter().map(|c| c.abs()).sum();
     COST_MARK * marks + COST_FIFTH * (coordinates[1] - NOMINAL_CENTRE).abs()
+}
+
+/// The `count` cheapest spellings in the coset of `coordinates` modulo
+/// `lattice`, best first: a closest vector under `weights`, then a walk of
+/// `width` steps either way along each member of `lattice` under
+/// [`spelling_cost`] itself.
+fn cheapest(
+    coordinates: &[i64],
+    lattice: &Matrix<i64>,
+    weights: &Matrix<f64>,
+    width: i64,
+    count: usize,
+) -> Vec<Vec<i64>> {
+    if lattice.is_empty() {
+        return vec![coordinates.to_vec()];
+    }
+    let rank = coordinates.len();
+
+    // `solve_diophantine` hands back an arbitrary vector, so reduce first.
+    let mut centre = coordinates.to_vec();
+    centre[1] -= NOMINAL_CENTRE;
+    let seed: Vec<i64> = match cvp_exact(&centre, lattice, weights) {
+        Ok(near) => coordinates.iter().zip(near).map(|(a, b)| a - b).collect(),
+        Err(_) => coordinates.to_vec(),
+    };
+
+    let mut found = Vec::new();
+    let mut candidate = vec![0; rank];
+    let mut steps = vec![-width; lattice.len()];
+    loop {
+        for slot in 0..rank {
+            candidate[slot] = seed[slot]
+                + steps
+                    .iter()
+                    .zip(lattice)
+                    .map(|(&step, row)| step * row[slot])
+                    .sum::<i64>();
+        }
+        found.push(candidate.clone());
+
+        let mut place = 0;
+        while place < steps.len() && steps[place] == width {
+            steps[place] = -width;
+            place += 1;
+        }
+        if place == steps.len() {
+            break;
+        }
+        steps[place] += 1;
+    }
+
+    // Compared rather than keyed, so that ranking a candidate does not clone
+    // its coordinates to break the tie with.
+    found.sort_unstable_by(|a, b| {
+        spelling_cost(a)
+            .cmp(&spelling_cost(b))
+            .then_with(|| spelling_break_ties(a).cmp(&spelling_break_ties(b)))
+            .then_with(|| a.cmp(b))
+    });
+    found.dedup();
+    found.truncate(count.max(1));
+    found
 }
 
 /// Tie-breaker for `spelling_cost`.
@@ -1238,6 +1380,99 @@ mod tests {
             }
         }
         assert!(missed_at_one > 0);
+    }
+
+    #[test]
+    fn just_nominals_are_the_diatonic_degrees() {
+        // (7, 11, 16, 20, 24, 26): third, seventh, fourth and sixth, as just
+        // intonation writes them, one mark each on vE, <Bb, tF and *Ab.
+        let subgroup: Subgroup = "2.3.5.7.11.13".parse().unwrap();
+        let nominals = just_nominals(&subgroup).unwrap();
+        let degrees: Vec<i64> = nominals.iter().map(|n| n.degree).collect();
+        let costs: Vec<i64> = nominals.iter().map(|n| n.cost).collect();
+        assert_eq!(degrees, vec![16, 20, 24, 26]);
+        assert_eq!(costs, vec![11, 15, 13, 19]);
+        // Every derived accidental has degree zero under it.
+        let map: Vec<i64> = [7, 11].into_iter().chain(degrees).collect();
+        for a in derive_accidentals(&subgroup).unwrap() {
+            let dot: i64 = a.vector.iter().zip(&map).map(|(x, d)| x * d).sum();
+            assert_eq!(dot, 0);
+        }
+    }
+
+    #[test]
+    fn nominal_costs_look_past_the_cheapest_spelling() {
+        // Schismatic's fifth chain puts 5 on F, and nowhere else.
+        let options = options_of("2.3.5", &[(32805, 32768)]);
+        assert_eq!(options[0].nominal_costs().unwrap(), vec![None]);
+        assert_eq!(options[1].nominal_costs().unwrap(), vec![Some(11)]);
+
+        // Flattone writes 11 as F#, which is on F.
+        let options = options_of("2.3.5.11", &[(45, 44), (81, 80)]);
+        assert_eq!(options[0].nominal_costs().unwrap(), vec![Some(4), Some(8)]);
+
+        // 41et's largest notation writes 7/4 as tA, but vBb is there too, at
+        // what just intonation spends on it, so the nominals are kept.
+        let options = et_options(41, "2.3.5.7.11");
+        assert_eq!(note_of(&options[2], 7, 4), "tA5");
+        assert_eq!(options[2].nominal_costs().unwrap()[1], Some(15));
+        assert!(options[2].keeps_nominals().unwrap());
+    }
+
+    #[test]
+    fn a_cheaper_spelling_elsewhere_does_not_hide_the_nominal() {
+        // Semaphore and pele each have a spelling cheaper than the one on the
+        // nominal, which the old rule, reading only `spell`, took as a miss.
+        let semaphore = options_of("2.3.7", &[(49, 48)]);
+        assert!(semaphore[0].keeps_nominals().unwrap());
+
+        let pele = tempered("2.3.5.7.11", &[(441, 440), (896, 891)]);
+        assert_eq!(accidental_ratios(&pele), vec![(81, 80), (33, 32)]);
+        assert!(pele.keeps_nominals().unwrap());
+    }
+
+    #[test]
+    fn a_tie_goes_to_the_lower_primes() {
+        // Miracle's two accidental notations tie three ways: whichever pair is
+        // kept, one of 5, 7 and 11 needs two marks. The simpler 5 and then 7
+        // are preferred, so it is 11 that takes them.
+        let miracle = &[(225, 224), (1029, 1024), (385, 384)][..];
+        let options = options_of("2.3.5.7.11", miracle);
+        assert_eq!(accidental_ratios(&options[1]), vec![(81, 80), (64, 63)]);
+        assert_eq!(note_of(&options[1], 11, 8), "^>F5");
+        assert_eq!(
+            tempered("2.3.5.7.11", miracle).generators(),
+            options[1].generators()
+        );
+    }
+
+    #[test]
+    fn a_notation_of_a_given_size() {
+        let subgroup: Subgroup = "2.3.5.7.11".parse().unwrap();
+        let commas = [(225, 224), (1029, 1024), (385, 384)]
+            .map(|(n, d)| subgroup.factorize(n, d).unwrap());
+        let miracle = Temperament::from_commas(&commas, &subgroup).unwrap();
+        let accidentals = derive_accidentals(&subgroup).unwrap();
+
+        // The fifth chain alone does not reach every pitch of miracle.
+        assert!(Notation::with_count(&miracle, &accidentals, 0).is_err());
+        let one = Notation::with_count(&miracle, &accidentals, 1).unwrap();
+        assert_eq!(accidental_ratios(&one), vec![(81, 80)]);
+        let three = Notation::with_count(&miracle, &accidentals, 3).unwrap();
+        assert_eq!(three.rank(), 5);
+        assert!(Notation::with_count(&miracle, &accidentals, 4).is_err());
+
+        // Only the images matter: in 41et 49/48 is a step as good as 81/80.
+        let subgroup: Subgroup = "2.3.5.7".parse().unwrap();
+        let t = Temperament::equal(41, &subgroup).unwrap();
+        let septimal = Accidental {
+            vector: subgroup.factorize(49, 48).unwrap(),
+            symbols: ('^', 'v'),
+        };
+        let n = Notation::with_count(&t, &[septimal], 1).unwrap();
+        let syntonic = Notation::with_count(&t, &derive_accidentals(&subgroup).unwrap()[..1], 1).unwrap();
+        assert_eq!(n.enharmonics(), syntonic.enharmonics());
+        assert_eq!(n.nominal_costs().unwrap(), syntonic.nominal_costs().unwrap());
     }
 
     #[test]
