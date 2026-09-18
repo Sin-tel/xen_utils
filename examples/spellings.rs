@@ -29,7 +29,7 @@ fn main() {
         println!("\n{:>4}  {:>9}  ways to write it", "step", "reading");
 
         for steps in 0..divisions + 1 {
-            let interval = temperament.map_inverse(&vec![steps]).unwrap();
+            let interval = temperament.map_inverse(&[steps]).unwrap();
             let seed = notation.spell(&interval).unwrap();
             let reading = simplifier.simplify(&interval).unwrap();
             let (num, den) = subgroup.to_ratio(&reading).unwrap();

@@ -220,7 +220,12 @@ reaching `vB#` at one mark and one sharp. Reducing against a *different* form
 from the one the search uses is the subtler version of the same error: the basis
 comes out short in the wrong sense. `Notation::weights` is built once and used
 for both the reduction and the search, carrying the squares of what `spelling_cost`
-costs - four for a fifth, forty nine for a mark.
+costs - four for a fifth, forty nine for a mark, and **nothing for an octave**.
+It once charged four for an octave too, which pulled the seed towards `C5` and
+made the best spelling depend on register: 2169 of 309094 calls in
+`respell_width` got even the single best answer wrong at width 1. The form is
+then only semidefinite, but no enharmonic is a stack of octaves, so it is
+definite on the enharmonic lattice and LLL and the closest vector are unaffected.
 
 **Seed near the answer.** `solve_diophantine` hands back any solution at all, and
 it can be far out: a two-accidental notation once produced a spelling fifteen
@@ -248,17 +253,31 @@ away from `225/224`.
   provably not enough: `a_radius_of_two_is_enough_and_a_radius_of_one_is_not`
   pins the case, 9et reaching `1/39366` of norm 29 where a radius of 1 stops at
   `1/34560` of norm 30.
-- **`respell` is a bounded search too**, but barely. The seed is an exact
-  closest vector, so the walk only corrects for the quadratic form standing in
-  for `spelling_cost`, and that correction is never more than one step over anything
-  swept: a width of 1 gives the same answers as a width of 5 everywhere, while a
-  width of 0 moves 260 lines and fails `verify` 117 times. `RESPELL_WIDTH` is 2,
-  for the margin. `verify` checks the answers independently, walking wider than
-  `respell` does and writing the cost out a second time.
-- **Six symbols means 19-limit is the ceiling** for any notation keeping more
-  than one accidental. A notation keeping exactly one reads it as ups and downs
-  does and gets the generic `^`/`v`, so it works at any prime - unless that one
-  accidental is `33/32`, which gets `t`/`d`.
+- **`respell` is a bounded search too.** The seed is an exact closest vector,
+  so the walk only corrects for the quadratic form standing in for
+  `spelling_cost`. `cargo run --release --example respell_width` measures how
+  far that correction reaches, against a much wider walk, over every notation
+  of both data files and the equal temperaments to 72, from both good and far
+  seeds (309094 calls):
+
+  ```
+  width   top 1 wrong   top 3 wrong   top 5 wrong
+    0         26126        all           all
+    1            70       3964        135181
+    2             0          0          1911
+  ```
+
+  Width 1 misses real answers, not ties - pele writes a pitch `vdF##` where
+  `E##` is cheaper - so `RESPELL_WIDTH` is 2, pinned by
+  `respell_walks_wide_enough`. That is exact for the first three answers on
+  everything swept, and approximate beyond: no fixed width can be exact for
+  every `count`. An exact version would bound the walk by cost instead - the L2
+  form never exceeds `spelling_cost`, so every spelling within cost `C` lies in
+  the L2 ball of radius `C` - but nothing needs it yet.
+- **Symbols are for debug printing only.** 5 to 19 have fixed ones; primes
+  beyond get arbitrary distinct pairs in subgroup order, so they are stable only
+  within one subgroup. `from_accidentals` refuses symbols that collide with each
+  other or with the nominals, sharps, flats and octave digits.
 - **An accidental defined as one step** - what ups and downs uses in general - is
   still not available, which is why some equal temperaments get no notation.
 - **Accidentals off the derived set: the maths does not care, the names do.**
@@ -268,19 +287,18 @@ away from `225/224`.
   the septimal `36/35`, it builds and spells correctly: `7/4` comes out
   `[2, -2, 1, -1]`, which is `16/9` raised a syntonic comma and lowered a
   `36/35`. Four things would need doing:
-  - **Symbols.** `accidental_prime` takes the first nonzero coordinate beyond 2
-    and 3, so `36/35 = [2, 2, -1, -1]` is attributed to 5. Both accidentals then
-    claim `^`/`v` and `7/4` prints as `^vBb5`, which cannot be read. Accidentals
-    would have to carry a symbol rather than have one derived.
+  - **Symbols.** Done: an `Accidental` carries its own symbols.
   - **`keeps_nominals`**, hence the recommendation: `just_nominal` needs to know
     which prime an accidental corrects and by how many fifths, and a mixed-axis
     accidental has no single answer.
   - **The half-apotome bound is unenforced** on a supplied accidental, and
-    `spelling_cost` charging seven per mark is only sound because of it.
-  - `Search::new` and `from_ji` derive one accidental per prime and would need a
-    supplied list instead. Mechanical.
+    deliberately so: `27/26` is a common accidental for 13 and breaks it. But
+    `spelling_cost` charging seven per mark is only sound because of it, so the
+    weights may need revisiting for such notations.
+  - `Search::new` and `from_ji` taking a supplied list: done, as
+    `options_with` and `from_temperament_with`.
 
-  That is five touch points in all; nothing in the core moves.
+  Nothing in the core moved.
 - **An equal temperament sweep is a coverage test, not a judgement.**
   Temperaments can be arbitrarily bad and most of what a sweep turns up is
   nobody's notation. It catches panics and shows what a rule change moved; for

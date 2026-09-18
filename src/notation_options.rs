@@ -13,7 +13,6 @@ pub(crate) struct NotationOptions<'a> {
 }
 
 impl<'a> NotationOptions<'a> {
-    /// Returns [`Error::Unsupported`] if some prime has no accidental.
     pub(crate) fn new(
         temperament: &'a Temperament,
         accidentals: &[Accidental],

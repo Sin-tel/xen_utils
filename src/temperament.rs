@@ -194,7 +194,7 @@ impl Temperament {
                 self.rank()
             )));
         }
-        let solution = solve_diophantine(&self.mapping, &column(&interval))?;
+        let solution = solve_diophantine(&self.mapping, &column(interval))?;
         Ok(first_column(&solution))
     }
 }

@@ -28,6 +28,14 @@ const PRIME_SYMBOLS: [(u32, char, char); 6] = [
     (19, ')', '('),
 ];
 
+/// Arbitrary symbols for primes beyond [`PRIME_SYMBOLS`], handed out in order.
+/// Past these, pairs of Greek letters and then CJK ideographs, which never run out.
+const FALLBACK_SYMBOLS: [(char, char); 5] =
+    [('!', '?'), ('[', ']'), ('{', '}'), ('+', '~'), ('\'', ',')];
+
+/// Characters [`Notation::note`] uses for something else, so no accidental may.
+const RESERVED_SYMBOLS: &str = "FCGDAEB#b-0123456789";
+
 /// The largest interval, in cents, that counts as an accidental:
 /// half an apotome, about 56.8 cents.
 ///
@@ -74,8 +82,7 @@ impl Notation {
     /// notes are one pitch and there are no enharmonics.
     ///
     /// # Errors
-    /// Returns [`Error::Unsupported`] if the subgroup has more primes beyond 3
-    /// than there are accidental symbols, or if some prime has no accidental.
+    /// Returns [`Error::Unsupported`] if some prime has no accidental.
     pub fn from_ji(subgroup: &Subgroup) -> Result<Self, Error> {
         let accidentals = derive_accidentals(subgroup)?;
         Notation::from_accidentals(&Temperament::from_ji(subgroup)?, &accidentals)
@@ -86,8 +93,7 @@ impl Notation {
     /// [keeps every nominal](Self::keeps_nominals).
     ///
     /// # Errors
-    /// Returns [`Error::Unsupported`] if the notation needs more accidentals
-    /// than there are symbols, if some prime has no accidental, or if no
+    /// Returns [`Error::Unsupported`] if some prime has no accidental, or if no
     /// notation can be derived at all.
     pub fn from_temperament(temperament: &Temperament) -> Result<Self, Error> {
         Self::from_temperament_with(temperament, &derive_accidentals(temperament.subgroup())?)
@@ -124,8 +130,7 @@ impl Notation {
     /// options enable them one at a time.
     ///
     /// # Errors
-    /// Returns [`Error::Unsupported`] if some prime has no accidental, if a
-    /// notation in the run needs more accidentals than there are symbols, or if
+    /// Returns [`Error::Unsupported`] if some prime has no accidental, or if
     /// no notation exists at all - an equal temperament whose fifth chain does
     /// not reach every note and which has no accidental worth a single step of
     /// it has none.
@@ -148,14 +153,15 @@ impl Notation {
     ///
     /// # Errors
     /// Returns [`Error::InvalidDimensions`] if an accidental is not an interval
-    /// of the temperament's subgroup, and [`Error::Unsupported`] if it cannot
-    /// be named, if an accidental beyond the first has no symbol, or if the
-    /// generators do not reach every pitch of the temperament.
+    /// of the temperament's subgroup, and [`Error::Unsupported`] if two
+    /// symbols collide, or if the generators do not reach every pitch of the
+    /// temperament.
     pub(crate) fn from_accidentals(
         temperament: &Temperament,
         accidentals: &[Accidental],
     ) -> Result<Self, Error> {
         let subgroup = temperament.subgroup();
+        check_symbols(accidentals)?;
 
         let mut generators = fifth_chain(subgroup.dim());
         generators.extend(accidentals.iter().map(|a| a.vector.clone()));
@@ -175,7 +181,7 @@ impl Notation {
 
         Ok(Notation {
             generators,
-            accidentals: accidentals.into_iter().map(|a| a.symbols).collect(),
+            accidentals: accidentals.iter().map(|a| a.symbols).collect(),
             images,
             enharmonics,
             weights,
@@ -268,6 +274,17 @@ impl Notation {
     /// Returns [`Error::InvalidDimensions`] if `coordinates` does not have one
     /// entry per notation coordinate.
     pub fn respell(&self, coordinates: &[i64], count: usize) -> Result<Vec<Vec<i64>>, Error> {
+        self.respell_within(coordinates, count, RESPELL_WIDTH)
+    }
+
+    /// [`respell`](Self::respell), walking `width` enharmonics either way.
+    #[doc(hidden)]
+    pub fn respell_within(
+        &self,
+        coordinates: &[i64],
+        count: usize,
+        width: i64,
+    ) -> Result<Vec<Vec<i64>>, Error> {
         self.check(coordinates)?;
         if self.enharmonics.is_empty() {
             return Ok(vec![coordinates.to_vec()]);
@@ -283,7 +300,7 @@ impl Notation {
 
         let mut found = Vec::new();
         let mut candidate = vec![0; self.rank()];
-        let mut steps = vec![-RESPELL_WIDTH; self.enharmonics.len()];
+        let mut steps = vec![-width; self.enharmonics.len()];
         loop {
             for slot in 0..self.rank() {
                 candidate[slot] = seed[slot]
@@ -296,8 +313,8 @@ impl Notation {
             found.push(candidate.clone());
 
             let mut place = 0;
-            while place < steps.len() && steps[place] == RESPELL_WIDTH {
-                steps[place] = -RESPELL_WIDTH;
+            while place < steps.len() && steps[place] == width {
+                steps[place] = -width;
                 place += 1;
             }
             if place == steps.len() {
@@ -308,11 +325,11 @@ impl Notation {
 
         // Compared rather than keyed, so that ranking a candidate does not clone
         // its coordinates to break the tie with.
-        // TODO: This tie-break doesn't quite work.
         found.sort_unstable_by(|a, b| {
             spelling_cost(a)
                 .cmp(&spelling_cost(b))
                 .then_with(|| spelling_break_ties(a).cmp(&spelling_break_ties(b)))
+                .then_with(|| a.cmp(b))
         });
         found.dedup();
         found.truncate(count.max(1));
@@ -428,18 +445,57 @@ fn just_nominal(accidental: &[i64], index: usize) -> i64 {
 /// Derives the default accidentals for a subgroup.
 pub fn derive_accidentals(subgroup: &Subgroup) -> Result<Vec<Accidental>, Error> {
     let mut result = Vec::new();
+    let mut fallbacks = 0;
     for index in 2..subgroup.dim() {
         let vector = derive_accidental_vector(subgroup, index)?;
         let prime = subgroup.basis()[index];
-        let symbols = PRIME_SYMBOLS
-            .iter()
-            .find(|&&(p, ..)| p == prime)
-            .map(|&(_, up, down)| (up, down))
-            .ok_or_else(|| Error::Unsupported(format!("prime {} has no symbol", prime)))?;
-
+        let symbols = match PRIME_SYMBOLS.iter().find(|&&(p, ..)| p == prime) {
+            Some(&(_, up, down)) => (up, down),
+            None => {
+                fallbacks += 1;
+                fallback_symbols(fallbacks - 1)
+            }
+        };
         result.push(Accidental { vector, symbols });
     }
     Ok(result)
+}
+
+/// The `n`th pair of arbitrary symbols for a prime with no symbol of its own.
+fn fallback_symbols(n: usize) -> (char, char) {
+    const GREEK_PAIRS: usize = 12;
+    let pair = |start: u32, k: usize| {
+        let up = char::from_u32(start + 2 * k as u32).expect("a valid code point");
+        let down = char::from_u32(start + 2 * k as u32 + 1).expect("a valid code point");
+        (up, down)
+    };
+    match n.checked_sub(FALLBACK_SYMBOLS.len()) {
+        None => FALLBACK_SYMBOLS[n],
+        Some(k) if k < GREEK_PAIRS => pair('α' as u32, k),
+        Some(k) => pair(0x4E00, k - GREEK_PAIRS),
+    }
+}
+
+/// Checks that every symbol of `accidentals` is distinct, and that none of
+/// them is a character [`Notation::note`] already uses.
+fn check_symbols(accidentals: &[Accidental]) -> Result<(), Error> {
+    let symbols: Vec<char> = accidentals
+        .iter()
+        .flat_map(|a| [a.symbols.0, a.symbols.1])
+        .collect();
+    for (index, &symbol) in symbols.iter().enumerate() {
+        if RESERVED_SYMBOLS.contains(symbol) {
+            return Err(Error::Unsupported(format!(
+                "accidental symbol '{symbol}' is already used for nominals, sharps, flats or octaves"
+            )));
+        }
+        if symbols[..index].contains(&symbol) {
+            return Err(Error::Unsupported(format!(
+                "accidental symbol '{symbol}' is used more than once"
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// How far up and down the fifth chain to look for an accidental.
@@ -487,7 +543,7 @@ pub(crate) fn derive_accidental_vector(
 const NOMINAL_CENTRE: i64 = 2;
 
 /// How far Notation::respell searches for.
-const RESPELL_WIDTH: i64 = 1;
+const RESPELL_WIDTH: i64 = 2;
 
 /// A sharp is worth two accidental marks.
 const COST_FIFTH: i64 = 2;
@@ -521,10 +577,14 @@ fn spelling_cost_l2(rank: usize) -> Matrix<f64> {
     (0..rank)
         .map(|row| {
             (0..rank)
-                .map(|col| match (row == col, row < 2) {
+                .map(|col| match (row == col, row) {
                     (false, _) => 0.0,
-                    (true, true) => (COST_FIFTH * COST_FIFTH) as f64,
-                    (true, false) => (COST_MARK * COST_MARK) as f64,
+                    // Register costs nothing. The form is then only
+                    // semidefinite, but no enharmonic is a stack of octaves,
+                    // so it is definite on the enharmonic lattice.
+                    (true, 0) => 0.0,
+                    (true, 1) => (COST_FIFTH * COST_FIFTH) as f64,
+                    (true, _) => (COST_MARK * COST_MARK) as f64,
                 })
                 .collect()
         })
@@ -679,7 +739,7 @@ mod tests {
     fn accidentals_match_fjs() {
         let n = notation("2.3.5.7.11.13.17.19");
 
-        let fjs_accidentals = vec![
+        let fjs_accidentals = [
             (81, 80),
             (64, 63),
             (33, 32),
@@ -1126,11 +1186,86 @@ mod tests {
         assert_eq!(note_of(&notation, 5, 4), "vE5");
     }
 
+    /// Every octave-free interval with exponents in -2..=2 beyond the octave.
+    fn small_intervals(dim: usize) -> Vec<Vec<i64>> {
+        (0..5i64.pow(dim as u32 - 1))
+            .map(|mut code| {
+                let mut interval = vec![0];
+                for _ in 1..dim {
+                    interval.push(code % 5 - 2);
+                    code /= 5;
+                }
+                interval
+            })
+            .collect()
+    }
+
     #[test]
-    fn too_many_accidentals() {
-        // 5, 7, 11, 13, 17 and 19 all have symbols; 23 does not.
-        assert!(Notation::from_ji(&Subgroup::p_limit(19)).is_ok());
-        assert!(Notation::from_ji(&Subgroup::p_limit(23)).is_err());
+    fn register_does_not_change_the_spelling() {
+        // Octaves cost nothing to write, so moving a pitch by octaves moves
+        // only its octave coordinate. The seed once charged for them and got
+        // this wrong far from C5.
+        for n in et_options(22, "2.3.5.7")
+            .into_iter()
+            .chain(options_of("2.3.5.7.11", &[(441, 440), (896, 891)]))
+        {
+            for interval in small_intervals(n.dim()) {
+                let spelling = n.spell(&interval).unwrap();
+                for octaves in [-12, -3, 4, 9] {
+                    let mut moved = interval.clone();
+                    moved[0] += octaves;
+                    let mut expected = spelling.clone();
+                    expected[0] += octaves;
+                    assert_eq!(n.spell(&moved).unwrap(), expected);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn respell_walks_wide_enough() {
+        // Pele's rank 4 notation has pitches whose best spelling a walk of one
+        // enharmonic either way misses, `E##` found as `vdF##`. Two finds them all.
+        let options = options_of("2.3.5.7.11", &[(441, 440), (896, 891)]);
+        let n = &options[1];
+        let mut missed_at_one = 0;
+        for interval in small_intervals(n.dim()) {
+            let spelling = n.spell(&interval).unwrap();
+            let wide = n.respell_within(&spelling, 3, 5).unwrap();
+            assert_eq!(n.respell(&spelling, 3).unwrap(), wide);
+            if n.respell_within(&spelling, 1, 1).unwrap()[0] != wide[0] {
+                missed_at_one += 1;
+            }
+        }
+        assert!(missed_at_one > 0);
+    }
+
+    #[test]
+    fn primes_beyond_the_table_get_arbitrary_symbols() {
+        // Past 19 the symbols are arbitrary, but every one is still distinct:
+        // enough primes to run through the ASCII and Greek pools and into CJK.
+        let n = Notation::from_ji(&Subgroup::p_limit(199)).unwrap();
+        assert_eq!(n.accidentals.len(), 44);
+        assert!(check_symbols(&derive_accidentals(n.subgroup()).unwrap()).is_ok());
+        assert_eq!(note_of(&notation("2.3.23"), 23, 16), "!Gb5");
+    }
+
+    #[test]
+    fn colliding_symbols_are_refused() {
+        let subgroup: Subgroup = "2.3.5.7".parse().unwrap();
+        let temperament = Temperament::from_ji(&subgroup).unwrap();
+        let mut accidentals = derive_accidentals(&subgroup).unwrap();
+        assert!(Notation::from_accidentals(&temperament, &accidentals).is_ok());
+
+        // The same symbol for two accidentals.
+        accidentals[1].symbols = ('^', '<');
+        assert!(Notation::from_accidentals(&temperament, &accidentals).is_err());
+        // Raising and lowering with one symbol.
+        accidentals[1].symbols = ('>', '>');
+        assert!(Notation::from_accidentals(&temperament, &accidentals).is_err());
+        // A flat.
+        accidentals[1].symbols = ('>', 'b');
+        assert!(Notation::from_accidentals(&temperament, &accidentals).is_err());
     }
 
     #[test]
@@ -1205,7 +1340,7 @@ mod tests {
         let weights = spelling_cost_l2(5);
 
         // Octaves are free only for the l1 cost
-        assert_eq!(spelling_cost(&vec![5, 2, 0, 0, 0]), 0);
+        assert_eq!(spelling_cost(&[5, 2, 0, 0, 0]), 0);
 
         for i in 1..rank {
             // Relative to D5
@@ -1255,10 +1390,12 @@ mod tests {
             symbols: ('^', 'v'),
         };
 
-        let options_49_48 = Notation::options_with(&temperament, &[acc_49_48.clone()]).unwrap();
+        let options_49_48 =
+            Notation::options_with(&temperament, std::slice::from_ref(&acc_49_48)).unwrap();
         assert_eq!(options_49_48.last().unwrap().rank(), 3);
 
-        let options_50_49 = Notation::options_with(&temperament, &[acc_50_49.clone()]).unwrap();
+        let options_50_49 =
+            Notation::options_with(&temperament, std::slice::from_ref(&acc_50_49)).unwrap();
         assert_eq!(options_50_49.last().unwrap().rank(), 3);
     }
 }
