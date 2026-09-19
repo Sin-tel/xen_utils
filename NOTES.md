@@ -31,8 +31,8 @@ Three spaces, one name each, and each vector is only ever called by its name:
 - a **tempered** interval is generator counts in the temperament, of length
   `Temperament::rank`.
 
-**Pitch** is kept for a real size in cents, which needs a tuning the library
-does not have yet.
+**Pitch** is kept for a real size in cents, which needs a tuning: `pitch` on a
+`Tuning` or a `Notation`.
 
 Mapping **down** is `temper`, from an interval or a spelling, and needs no
 choice. Going **up** chooses an element of a coset, always starts from a tempered
@@ -270,6 +270,36 @@ microseconds. On 20,674 tempered intervals up to the 19-limit the two agreed on
 every best answer, and the walk's top 8 was worse in 1,046 lists, since it only
 ranked what it happened to pass.
 
+## Tuning
+
+A `Tuning` is cents per generator of the temperament, so it depends on the
+temperament alone, like the simplifier: every notation of a temperament gives a
+note the same size. `Temperament` stays integer, exact and `Eq`; the floats live
+beside it.
+
+The only optimised tuning is **Weil-Euclidean**, the user's choice: it prefers
+small intervals (`5/3` over `15/1`) and does slightly better than Tenney. No
+octave is held pure. The octave's weight keeps it close anyway, and the slack
+improves the rest: 12et comes out at 99.868 cents a step, meantone's octave at
+1201.391. The weights are the subgroup's logs, nothing tuned by hand.
+
+The metric on tuning maps is the inverse of `(B diag(j))^T (B diag(j))`, `B` the
+identity stacked on a row of ones. Sherman-Morrison makes that a rank one update
+of Tenney, `diag(l^2) - l l^T / (n + 1)` with `l` the inverse log primes, which
+`weil_euclidean` builds directly and a test checks against the inversion. The
+tuning solves the normal equations `(M G M^T) g = M G J`, rank by rank, by
+Gaussian elimination: too small to want a linear algebra crate. The results
+match the user's Python exactly.
+
+A `Notation` builds the tuning once and keeps the cents of each notation
+coordinate, so `pitch` of a spelling is one dot product; `with_tuning` swaps in
+another tuning of the same temperament, such as `Tuning::new` with sizes of the
+user's own.
+
+The generators are those of the HNF, since that is what tempered intervals
+count: porcupine's second is -163.9 cents and diaschismic's 1903.0, not the
+usual period and generator. Pitches do not care; reading `generators()` does.
+
 ## Performance
 
 `cargo bench` (criterion, `benches/notation.rs`) times what runs repeatedly,
@@ -386,10 +416,12 @@ now costs time rather than answers.
   search and its ranking. Tested through `options`.
 - `simplify.rs` - `Simplifier`: the comma lattice reduced once, then an exact
   weighted L1 enumeration per tempered interval.
+- `tuning.rs` - `Tuning`, the Weil-Euclidean metric and its least squares.
 - `temperament.rs`, `primes.rs`, `util.rs` - the temperament, the subgroup, and
   integer vector helpers with no music in them.
 
 Examples: `verify` sweeps the invariants and prints a failure count; `dump`
 prints a fingerprint of every notation to be diffed across a change; `notations`
 lays out each run; `simplifications` and `spellings` are the two questions;
-`simplify` and `miracle` walk one temperament. `cargo bench` times the hot path.
+`simplify` and `miracle` walk one temperament; `tunings` prints the
+Weil-Euclidean tuning of the named list. `cargo bench` times the hot path.

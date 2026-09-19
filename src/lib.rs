@@ -15,6 +15,7 @@ mod notation_options;
 pub mod primes;
 pub mod simplify;
 pub mod temperament;
+pub mod tuning;
 mod util;
 
 pub use diophantine::Matrix;
@@ -23,3 +24,4 @@ pub use notation::Notation;
 pub use primes::Subgroup;
 pub use simplify::Simplifier;
 pub use temperament::Temperament;
+pub use tuning::Tuning;
