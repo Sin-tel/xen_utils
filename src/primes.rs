@@ -208,6 +208,24 @@ impl Subgroup {
         Ok(interval)
     }
 
+    /// Parses a ratio such as `"81/80"`, or a whole number such as `"5"`, into
+    /// its interval vector over this basis.
+    ///
+    /// # Errors
+    /// Returns [`Error::InvalidRatio`] if `ratio` is not a fraction of two
+    /// positive integers, and [`Error::NotInSubgroup`] if it has a prime factor
+    /// outside the basis.
+    pub fn parse_ratio(&self, ratio: &str) -> Result<Vec<i64>, Error> {
+        let invalid = || Error::InvalidRatio(format!("{ratio:?} is not a ratio like `81/80`"));
+        let (num, den) = ratio.trim().split_once('/').unwrap_or((ratio.trim(), "1"));
+        let num: u64 = num.trim().parse().map_err(|_| invalid())?;
+        let den: u64 = den.trim().parse().map_err(|_| invalid())?;
+        if num == 0 || den == 0 {
+            return Err(invalid());
+        }
+        self.factorize(num, den)
+    }
+
     /// The rational `prod(b_i ^ e_i)` denoted by `interval`, as a fraction in
     /// lowest terms.
     ///
@@ -345,6 +363,21 @@ mod tests {
         // 2^63 fits in a u64, 2^64 does not.
         assert!(s.to_ratio(&[63, 0, 0]).is_ok());
         assert!(s.to_ratio(&[64, 0, 0]).is_err());
+    }
+
+    #[test]
+    fn parse_ratio() {
+        let s = Subgroup::p_limit(5);
+        assert_eq!(s.parse_ratio("81/80").unwrap(), vec![-4, 4, -1]);
+        assert_eq!(s.parse_ratio(" 3 / 2 ").unwrap(), vec![-1, 1, 0]);
+        assert_eq!(s.parse_ratio("5").unwrap(), vec![0, 0, 1]);
+        for bad in ["", "3/", "/2", "0/1", "1/0", "-3/2", "3/2/1", "1.5"] {
+            assert!(
+                matches!(s.parse_ratio(bad), Err(Error::InvalidRatio(_))),
+                "{bad:?}"
+            );
+        }
+        assert!(matches!(s.parse_ratio("7/4"), Err(Error::NotInSubgroup(_))));
     }
 
     #[test]

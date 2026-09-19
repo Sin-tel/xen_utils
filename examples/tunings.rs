@@ -64,12 +64,7 @@ fn parse_temperament(definition: &str, subgroup: &Subgroup) -> Result<Temperamen
     let commas = definition
         .split([',', ' '])
         .filter(|field| !field.is_empty())
-        .map(|ratio| {
-            let (num, den) = ratio
-                .split_once('/')
-                .ok_or_else(|| format!("{ratio:?} is not a ratio like `81/80`"))?;
-            Ok(subgroup.factorize(num.parse()?, den.parse()?)?)
-        })
-        .collect::<Result<Vec<Vec<i64>>, Box<dyn Error>>>()?;
+        .map(|ratio| subgroup.parse_ratio(ratio))
+        .collect::<Result<Vec<Vec<i64>>, _>>()?;
     Ok(Temperament::from_commas(&commas, subgroup)?)
 }

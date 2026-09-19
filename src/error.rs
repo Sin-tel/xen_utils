@@ -9,6 +9,8 @@ pub enum Error {
     InvalidDimensions(String),
     /// A basis of primes did not describe a valid subgroup.
     InvalidSubgroup(String),
+    /// A string was not a ratio.
+    InvalidRatio(String),
     /// A rational number could not be expressed in the given subgroup basis.
     NotInSubgroup(String),
     /// A computed value did not fit in its integer type.
@@ -24,6 +26,7 @@ impl fmt::Display for Error {
         match self {
             Error::InvalidDimensions(msg) => write!(f, "invalid dimensions: {msg}"),
             Error::InvalidSubgroup(msg) => write!(f, "invalid subgroup: {msg}"),
+            Error::InvalidRatio(msg) => write!(f, "invalid ratio: {msg}"),
             Error::NotInSubgroup(msg) => write!(f, "not in subgroup: {msg}"),
             Error::Overflow(msg) => write!(f, "overflow: {msg}"),
             Error::Unsupported(msg) => write!(f, "unsupported: {msg}"),
