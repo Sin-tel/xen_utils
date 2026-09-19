@@ -120,9 +120,15 @@ half-apotomes for a mark and two for a fifth.
 The fifths are counted from `D`, the middle of the seven naturals, rather than
 from `C`. Measuring from `C` makes the flat side cheaper than the sharp side by
 one fifth throughout, which is enough to spell 5et's third `F` and 7et's `Eb`.
-Ties fall back to the coordinates, so the order never depends on how the search
-was walked. The octave does not appear: register costs nothing to write, and the
-tempered interval fixes it once the rest is chosen.
+The octave does not appear: register costs nothing to write, and the tempered
+interval fixes it once the rest is chosen.
+
+**The search is exact.** `spelling_cost` is a weighted L1 norm around `D`, with
+weights `(0, 2, 7, 7, ..)`, so `spellings` is `diophantine::cvp_l1_top_k` over
+the enharmonics, the same search as the simplifier's. Ties go to the quadratic
+form - one mark and a sharp, `vB#`, before three marks, `^^^B` - and then to the
+enharmonic, which in 12et puts the flat side first: `Ab` before `G#`. Both are
+arbitrary; where they matter, ask for more and sort.
 
 ## Nominals are degrees
 
@@ -271,63 +277,51 @@ averaged over every step of the temperament. Per call:
 
 ```
                                 41et 2.3.5.7.11   72et 2.3.5.7.11   41et 2.3.5.7.11.13
-Notation::spell                     3.3 us            3.2 us             2.9 us
-Notation::spellings(4)              3.0 us            3.0 us             3.0 us
-Notation::spell_interval            3.0 us            3.0 us             3.0 us
+Notation::spell                     2.3 us            1.9 us             2.0 us
+Notation::spellings(4)              2.4 us            2.5 us             2.4 us
+Notation::spell_interval            2.2 us            2.0 us             2.0 us
 Notation::to_interval                38 ns             38 ns              39 ns
 Notation::temper                     34 ns             34 ns              34 ns
 Simplifier::simplify                4.0 us            4.1 us             5.5 us
 Simplifier::simplifications(8)      8.6 us            8.3 us              16 us
-Notation::from_temperament          142 us            504 us             178 us
+Notation::from_temperament          104 us            179 us             127 us
 ```
 
 `to_interval` and `temper` are matrix multiplies and not worth a second thought.
-**`spell` is not free**: it is a diophantine solve, a closest vector and a box
-walked under `spelling_cost`. Still cheap enough to spell every visible note on a
-redraw - a hundred notes is a third of a millisecond - but not to be called in a
-loop that does not need it. `spellings` costs the same, since the solve and the
-closest vector are most of it.
+**`spell` is not free**: it is a diophantine solve and an enumeration. Still cheap
+enough to spell every visible note on a redraw - a hundred notes is a fifth of a
+millisecond - but not to be called in a loop that does not need it. `spellings`
+of a few costs little more, since the solve is most of it.
 
-Simplifying is an enumeration and grows with the lattice's rank and with
+Simplifying is an enumeration too and grows with the lattice's rank and with
 `count`, slowly: about 10 microseconds for the best at the 19-limit.
 
 Building a notation is once per temperament, but `from_temperament` searches
 every subset of the accidentals and scores each, so it grows with them: 72et
-keeps three of three and is the slowest here at half a millisecond.
+keeps three of three and is the slowest here.
 
-`spell` was 48 microseconds before two fixes. The first was the one the
-simplifier's old walk had needed too: ranking a candidate cloned its coordinates
-to break the tie with. The second was narrowing `RESPELL_WIDTH` from 5 to 2, which
-is where `spellings` asked for more than one answer spends almost everything -
-that call went from 8.4 microseconds to 1.3.
+## Every search needs a reduced basis
 
-A special case for one answer, which is what `spell` asks for, was worth 3.4x at
-width 5 and 13% at width 2, so it is gone: most callers want several anyway.
-
-## Everything here walks a box, and every box needs a reduced basis
-
-`spellings` and the examples do the same thing - seed a point, then walk a
-bounded box around it under the norm actually wanted - as `simplify` did until it
-became an exact enumeration, and the same two mistakes were made in each.
+Both searches are enumerations of a lattice under a quadratic form, and the
+same two mistakes were made in each before they were.
 
 **Reduce the basis first, against the form the search measures with.**
 Unreduced, 41et's enharmonics come back as "the octave is 41 ups" and "the fifth
-is 24 ups", and a box around those finds `vvvvvvvD` at seven marks while never
+is 24 ups", and a search around those finds `vvvvvvvD` at seven marks while never
 reaching `vB#` at one mark and one sharp. Reducing against a *different* form
 from the one the search uses is the subtler version of the same error: the basis
 comes out short in the wrong sense. `Notation::weights` is built once and used
-for both the reduction and the search, carrying the squares of what `spelling_cost`
-costs - four for a fifth, forty nine for a mark, and **nothing for an octave**.
-It once charged four for an octave too, which pulled the seed towards `C5` and
-made the best spelling depend on register: 2169 of 309094 calls in the width
-sweep got even the single best answer wrong at width 1. The form is
-then only semidefinite, but no enharmonic is a stack of octaves, so it is
-definite on the enharmonic lattice and LLL and the closest vector are unaffected.
+for the reduction, carrying the squares of what `spelling_cost` costs - four for
+a fifth, forty nine for a mark, and **nothing for an octave**. It once charged
+four for an octave too, which pulled the search towards `C5` and made the best
+spelling depend on register. The form is then only semidefinite, but no
+enharmonic is a stack of octaves, so it is definite on the enharmonic lattice.
+The simplifier's comma lattice is reduced under `diag(p²)` for the same reason.
 
 **Seed near the answer.** `solve_diophantine` hands back any solution at all, and
 it can be far out: a two-accidental notation once produced a spelling fifteen
-marks from the best one, and orwell's replacement for `64/63` sat six relations
-away from `225/224`.
+marks from the best one. The enumeration starts from the closest point, so this
+now costs time rather than answers.
 
 ## Loose ends and known limits
 
@@ -348,26 +342,11 @@ away from `225/224`.
 - **The simplifier ranks only what it is asked for.** `simplifications` is an
   exact top `count`, so the search closes only once it holds `count` intervals:
   asking for all of them, say `usize::MAX`, never returns.
-- **`spellings` is a bounded search.** The seed is an exact closest vector,
-  so the walk only corrects for the quadratic form standing in for
-  `spelling_cost`. `cargo run --release --example spellings_width` measures how
-  far that correction reaches, against a much wider walk, over every notation
-  of both data files and the equal temperaments to 72 (154547 calls):
-
-  ```
-  width   top 1 wrong   top 3 wrong   top 5 wrong
-    0         13628        all           all
-    1            35       1952         67643
-    2             0          0           961
-  ```
-
-  Width 1 misses real answers, not ties - pele writes a tempered interval `vdF##`
-  where `E##` is cheaper - so `RESPELL_WIDTH` is 2, pinned by
-  `spellings_walk_wide_enough`. That is exact for the first three answers on
-  everything swept, and approximate beyond: no fixed width can be exact for
-  every `count`. An exact version would bound the walk by cost instead - the L2
-  form never exceeds `spelling_cost`, so every spelling within cost `C` lies in
-  the L2 ball of radius `C` - but nothing needs it yet.
+- **Spellings, too, are an exact top `count`**, at least one, and asking for all
+  of them never returns. They were a walk of a box of enharmonics two wide
+  before, which missed real answers at width one - pele wrote a tempered
+  interval `vdF##` where `E##` is cheaper - and was exact for only the first
+  three at width two.
 - **Symbols are for debug printing only.** 5 to 19 have fixed ones; primes
   beyond get arbitrary distinct pairs in subgroup order, so they are stable only
   within one subgroup. `from_accidentals` refuses symbols that collide with each
@@ -413,5 +392,4 @@ away from `225/224`.
 Examples: `verify` sweeps the invariants and prints a failure count; `dump`
 prints a fingerprint of every notation to be diffed across a change; `notations`
 lays out each run; `simplifications` and `spellings` are the two questions;
-`spellings_width` sweeps how far `spellings` has to walk;
 `simplify` and `miracle` walk one temperament. `cargo bench` times the hot path.

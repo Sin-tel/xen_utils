@@ -7,7 +7,7 @@
 //!   * every prime can be written, and reading the spelling back gives the
 //!     tempered interval it was asked for;
 //!   * no spelling in the same coset is cheaper to write - checked by walking
-//!     wider than `spellings` does and writing the cost out a second time, so
+//!     a box of enharmonics and writing the cost out a second time, so
 //!     that this checks the answer rather than restating how it was found;
 //!   * ranks run upwards one at a time, and the first has the rank of the
 //!     temperament where one of that rank exists at all.
@@ -115,8 +115,8 @@ fn check(name: &str, t: &Temperament) -> usize {
 
         // Every prime can be written; reading the spelling back gives the tempered interval
         // it was asked for; and nothing in the coset is cheaper to write. The
-        // cost is written out again here, and the coset walked wider than
-        // `spellings` walks it, so that this checks the answer rather than
+        // cost is written out again here, and a box of the coset walked by
+        // brute force, so that this checks the answer rather than
         // restating how it was found.
         for prime in 0..n.dim() {
             let mut interval = vec![0i64; n.dim()];
@@ -158,7 +158,7 @@ fn check(name: &str, t: &Temperament) -> usize {
     failures
 }
 
-/// How far either way to walk each enharmonic, wider than `spellings` does.
+/// How far either way to walk each enharmonic.
 const WIDTH: i64 = 8;
 
 /// A spelling of the same tempered interval that costs less than `spelling`, if there is one

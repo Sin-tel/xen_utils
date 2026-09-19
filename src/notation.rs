@@ -1,12 +1,12 @@
 //! Notation systems as linear maps.
 
-use diophantine::{Matrix, cvp_exact, eye, kernel_left, lll, solve_diophantine, transpose};
+use diophantine::{Matrix, cvp_l1_top_k, eye, kernel_left, lll, solve_diophantine, transpose};
 
 use crate::Error;
 use crate::notation_options::NotationOptions;
 use crate::primes::Subgroup;
 use crate::temperament::Temperament;
-use crate::util::{LLL_DELTA, column, combination, first_column};
+use crate::util::{LLL_DELTA, column, combination, first_column, subtract};
 
 /// The nominals, in order of the fifth chain.
 /// Nominals for note at `f` fifths spells `NOMINALS[(f + 1) mod 7]`.
@@ -291,14 +291,26 @@ impl Notation {
         self.spell(&self.temperament.temper(interval)?)
     }
 
-    /// The `count` best ways to write a tempered interval, best first.
+    /// The `count` best ways to write a tempered interval, best first: the
+    /// cheapest under the spelling cost, ties going to the quadratic form and
+    /// then to the enharmonic. At least one, and exact, so the search only
+    /// closes once it holds `count` spellings: ask for the handful wanted.
     ///
     /// # Errors
     /// Returns [`Error::InvalidDimensions`] if `tempered` does not have one
     /// entry per generator of the temperament, and [`Error::Unsupported`] if
     /// the notation cannot write it.
     pub fn spellings(&self, tempered: &[i64], count: usize) -> Result<Vec<Vec<i64>>, Error> {
-        self.spellings_within(tempered, count, RESPELL_WIDTH)
+        let rank = self.temperament.rank();
+        if tempered.len() != rank {
+            return Err(Error::InvalidDimensions(format!(
+                "tempered interval has {} entries, expected {rank}",
+                tempered.len()
+            )));
+        }
+        let solution = solve_diophantine(&transpose(&self.images), &column(tempered))
+            .map_err(|_| Error::Unsupported(format!("{tempered:?} cannot be written")))?;
+        cheapest(&first_column(&solution), &self.enharmonics, count)
     }
 
     /// [`spellings`](Self::spellings) of the tempered interval a just interval
@@ -314,32 +326,6 @@ impl Notation {
         count: usize,
     ) -> Result<Vec<Vec<i64>>, Error> {
         self.spellings(&self.temperament.temper(interval)?, count)
-    }
-
-    /// [`spellings`](Self::spellings), walking `width` enharmonics either way.
-    #[doc(hidden)]
-    pub fn spellings_within(
-        &self,
-        tempered: &[i64],
-        count: usize,
-        width: i64,
-    ) -> Result<Vec<Vec<i64>>, Error> {
-        let rank = self.temperament.rank();
-        if tempered.len() != rank {
-            return Err(Error::InvalidDimensions(format!(
-                "tempered interval has {} entries, expected {rank}",
-                tempered.len()
-            )));
-        }
-        let solution = solve_diophantine(&transpose(&self.images), &column(tempered))
-            .map_err(|_| Error::Unsupported(format!("{tempered:?} cannot be written")))?;
-        Ok(cheapest(
-            &first_column(&solution),
-            &self.enharmonics,
-            &self.weights,
-            width,
-            count,
-        ))
     }
 
     /// The cheapest way to write each prime beyond 3 on its just nominal: at
@@ -378,12 +364,10 @@ impl Notation {
             prime[index] = 1;
             let mut target = self.temperament.temper(&prime)?;
             target.push(nominal.degree);
-            let spelling = solve_diophantine(&transpose(&with_degree), &column(&target))
-                .ok()
-                .map(|solution| {
-                    let seed = first_column(&solution);
-                    cheapest(&seed, &level, &self.weights, RESPELL_WIDTH, 1).remove(0)
-                });
+            let spelling = match solve_diophantine(&transpose(&with_degree), &column(&target)) {
+                Ok(solution) => Some(cheapest(&first_column(&solution), &level, 1)?.remove(0)),
+                Err(_) => None,
+            };
             spellings.push(spelling);
         }
         Ok(spellings)
@@ -642,9 +626,6 @@ pub(crate) fn derive_accidental_vector(
 /// middle of them.
 const NOMINAL_CENTRE: i64 = 2;
 
-/// How far [`Notation::spellings`] walks along each enharmonic, either way.
-const RESPELL_WIDTH: i64 = 2;
-
 /// A sharp is worth two accidental marks.
 const COST_FIFTH: i64 = 2;
 const COST_MARK: i64 = 7;
@@ -659,71 +640,37 @@ fn spelling_cost(coordinates: &[i64]) -> i64 {
     COST_MARK * marks + COST_FIFTH * (coordinates[1] - NOMINAL_CENTRE).abs()
 }
 
-/// The `count` cheapest spellings in the coset of `coordinates` modulo
-/// `lattice`, best first: a closest vector under `weights`, then a walk of
-/// `width` steps either way along each member of `lattice` under
-/// [`spelling_cost`] itself.
-fn cheapest(
-    coordinates: &[i64],
-    lattice: &Matrix<i64>,
-    weights: &Matrix<f64>,
-    width: i64,
-    count: usize,
-) -> Vec<Vec<i64>> {
-    if lattice.is_empty() {
-        return vec![coordinates.to_vec()];
-    }
-    let rank = coordinates.len();
-
-    // `solve_diophantine` hands back an arbitrary vector, so reduce first.
-    let mut centre = coordinates.to_vec();
-    centre[1] -= NOMINAL_CENTRE;
-    let seed: Vec<i64> = match cvp_exact(&centre, lattice, weights) {
-        Ok(near) => coordinates.iter().zip(near).map(|(a, b)| a - b).collect(),
-        Err(_) => coordinates.to_vec(),
-    };
-
-    let mut found = Vec::new();
-    let mut candidate = vec![0; rank];
-    let mut steps = vec![-width; lattice.len()];
-    loop {
-        for slot in 0..rank {
-            candidate[slot] = seed[slot]
-                + steps
-                    .iter()
-                    .zip(lattice)
-                    .map(|(&step, row)| step * row[slot])
-                    .sum::<i64>();
-        }
-        found.push(candidate.clone());
-
-        let mut place = 0;
-        while place < steps.len() && steps[place] == width {
-            steps[place] = -width;
-            place += 1;
-        }
-        if place == steps.len() {
-            break;
-        }
-        steps[place] += 1;
-    }
-
-    // Compared rather than keyed, so that ranking a candidate does not clone
-    // its coordinates to break the tie with.
-    found.sort_unstable_by(|a, b| {
-        spelling_cost(a)
-            .cmp(&spelling_cost(b))
-            .then_with(|| spelling_break_ties(a).cmp(&spelling_break_ties(b)))
-            .then_with(|| a.cmp(b))
-    });
-    found.dedup();
-    found.truncate(count.max(1));
-    found
+/// What each notation coordinate costs, once for each unit away from the
+/// centre: nothing for the octave, [`COST_FIFTH`] for the fifth and
+/// [`COST_MARK`] for each accidental. [`spelling_cost`] is the weighted L1 norm
+/// under these, around [`NOMINAL_CENTRE`].
+fn spelling_cost_weights(len: usize) -> Vec<i64> {
+    (0..len)
+        .map(|slot| match slot {
+            0 => 0,
+            1 => COST_FIFTH,
+            _ => COST_MARK,
+        })
+        .collect()
 }
 
-/// Tie-breaker for `spelling_cost`.
-fn spelling_break_ties(coordinates: &[i64]) -> i64 {
-    (coordinates[1] - NOMINAL_CENTRE).abs()
+/// The `count` cheapest spellings in the coset of `spelling` modulo `lattice`,
+/// best first, and at least one.
+///
+/// [`spelling_cost`] is a weighted L1 norm, so this is an exact closest vector
+/// search under it. Ties go to the quadratic form, then to the lattice vector.
+/// `lattice` should be reduced under [`spelling_cost_l2`] for speed.
+fn cheapest(spelling: &[i64], lattice: &Matrix<i64>, count: usize) -> Result<Vec<Vec<i64>>, Error> {
+    if lattice.is_empty() {
+        return Ok(vec![spelling.to_vec()]);
+    }
+    let mut centred = spelling.to_vec();
+    centred[1] -= NOMINAL_CENTRE;
+    let weights = spelling_cost_weights(spelling.len());
+    Ok(cvp_l1_top_k(&centred, lattice, &weights, count.max(1))?
+        .iter()
+        .map(|enharmonic| subtract(spelling, enharmonic))
+        .collect())
 }
 
 /// Whether generators with these `images` reach every tempered interval of a
@@ -733,20 +680,22 @@ pub(crate) fn spans(images: &Matrix<i64>, rank: usize) -> bool {
     solve_diophantine(&transpose(images), &identity).is_ok()
 }
 
-/// A quadratic stand-in for [`spelling_cost`], for the lattice algorithms, which want
-/// a form rather than a count.
-fn spelling_cost_l2(rank: usize) -> Matrix<f64> {
-    (0..rank)
+/// A quadratic stand-in for [`spelling_cost`], for reducing a lattice: the
+/// squares of [`spelling_cost_weights`] on the diagonal.
+///
+/// Register costs nothing, so the form is only semidefinite, but no enharmonic
+/// is a stack of octaves and it is definite on every lattice reduced under it.
+fn spelling_cost_l2(len: usize) -> Matrix<f64> {
+    let weights = spelling_cost_weights(len);
+    (0..len)
         .map(|row| {
-            (0..rank)
-                .map(|col| match (row == col, row) {
-                    (false, _) => 0.0,
-                    // Register costs nothing. The form is then only
-                    // semidefinite, but no enharmonic is a stack of octaves,
-                    // so it is definite on the enharmonic lattice.
-                    (true, 0) => 0.0,
-                    (true, 1) => (COST_FIFTH * COST_FIFTH) as f64,
-                    (true, _) => (COST_MARK * COST_MARK) as f64,
+            (0..len)
+                .map(|col| {
+                    if row == col {
+                        (weights[row] * weights[row]) as f64
+                    } else {
+                        0.0
+                    }
                 })
                 .collect()
         })
@@ -1385,21 +1334,39 @@ mod tests {
     }
 
     #[test]
-    fn spellings_walk_wide_enough() {
-        // Pele's rank 4 notation has intervals whose best spelling a walk of one
-        // enharmonic either way misses, `E##` found as `vdF##`. Two finds them all.
-        let options = options_of("2.3.5.7.11", &[(441, 440), (896, 891)]);
-        let n = &options[1];
-        let mut missed_at_one = 0;
-        for interval in small_intervals(n.dim()) {
-            let tempered = n.temperament().temper(&interval).unwrap();
-            let wide = n.spellings_within(&tempered, 3, 5).unwrap();
-            assert_eq!(n.spellings(&tempered, 3).unwrap(), wide);
-            if n.spellings_within(&tempered, 1, 1).unwrap()[0] != wide[0] {
-                missed_at_one += 1;
+    fn nothing_near_the_best_spellings_is_cheaper() {
+        // Checked independently of the enumeration: every spelling within a
+        // box of enharmonics around the answer costs no less than the third
+        // best, and the three answers are the three cheapest costs in the box.
+        // Pele's rank 4 notation is where a walk one enharmonic wide once
+        // missed `E##` for `vdF##`; 41et's largest has three enharmonics.
+        let pele = options_of("2.3.5.7.11", &[(441, 440), (896, 891)]);
+        let et = et_options(41, "2.3.5.7.11");
+        for (n, width) in [(&pele[1], 8i64), (&et[2], 4)] {
+            let lattice = n.enharmonics();
+            let side = 2 * width + 1;
+            for interval in small_intervals(n.dim()) {
+                let tempered = n.temperament().temper(&interval).unwrap();
+                let found = n.spellings(&tempered, 3).unwrap();
+                let mut costs: Vec<i64> = (0..side.pow(lattice.len() as u32))
+                    .map(|mut code| {
+                        let mut candidate = found[0].clone();
+                        for row in lattice {
+                            let times = code % side - width;
+                            code /= side;
+                            for (c, &r) in candidate.iter_mut().zip(row) {
+                                *c += times * r;
+                            }
+                        }
+                        assert_eq!(n.temper(&candidate).unwrap(), tempered);
+                        spelling_cost(&candidate)
+                    })
+                    .collect();
+                costs.sort_unstable();
+                let found_costs: Vec<i64> = found.iter().map(|s| spelling_cost(s)).collect();
+                assert_eq!(found_costs, costs[..3], "{interval:?}");
             }
         }
-        assert!(missed_at_one > 0);
     }
 
     #[test]
