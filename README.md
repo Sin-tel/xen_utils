@@ -9,12 +9,12 @@ It supports just intonation (JI), regular temperaments and equal temperaments ov
 ## What it does
 
 - **Temperaments.** Build a regular temperament over any prime subgroup: from the commas it tempers out, from a mapping matrix, or as an equal temperament.
-- **Notations.** Derives available notations for any temperament. Accidentals can be automatically derived from the subgroup. The library then picks which of them the temperament needs, preferring notations that write every prime on its usual letter.
-- **Spelling.** Finds the best ways to write a tempered interval from the enharmonic intervals that the notation implies (e.g. `C## = D`). `spellings` returns an exact ranked list of ways to spell an interval under a cost function, not a heuristic guess.
+- **Notations.** Derives available notations for any temperament. Accidentals can be automatically derived from the subgroup. The library then picks which of these are necessary, and runs a search to find the best notation systems. It tries to find notations that write every prime on its usual letter (i.e. a major third is written as third, not a diminished fourth).
+- **Spelling.** Finds the best ways to write a tempered interval from the enharmonic intervals that the notation implies (e.g. `C## = D`). `spellings` returns a ranked list of ways to spell an interval under a cost function.
 - **Simplification.** Finds the simplest just intervals a tempered interval stands for, ranked by the Wilson norm (sum of prime factors).
-- **Tuning.** Computes the Weil-Euclidean optimal tuning of a temperament, and the size in cents of any interval or written note.
+- **Tuning.** Computes the optimal tuning of a temperament, and the size in cents of any interval or written note.
 
-All searches are exact lattice searches, built on the [diophantine](https://github.com/Sin-tel/diophantine) crate.
+Instead of relying on heuristics, all searches are implemented using exact lattice algorithms, built on the [diophantine](https://github.com/Sin-tel/diophantine) crate.
 
 ## Example
 
