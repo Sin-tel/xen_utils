@@ -4,7 +4,7 @@ use diophantine::{Matrix, cvp_l1_top_k};
 
 use crate::Error;
 use crate::Temperament;
-use crate::util::subtract;
+use crate::util::{MAX_SEARCH_NODES, subtract};
 
 /// Finds the simplest just intervals that temper to a given tempered interval.
 ///
@@ -68,18 +68,41 @@ impl Simplifier {
     /// `count` intervals, so ask for the handful wanted rather than all of them.
     /// Just intonation has only the one.
     ///
+    /// Exact within [`MAX_SEARCH_NODES`]. A tempered
+    /// interval absurdly far from a unison exhausts that budget and is answered
+    /// with the best intervals found, which may be fewer than `count`.
+    ///
     /// # Errors
     /// Returns [`Error::InvalidDimensions`] if `tempered` does not have one
     /// entry per generator of the temperament.
     pub fn simplifications(&self, tempered: &[i64], count: usize) -> Result<Matrix<i64>, Error> {
+        Ok(self.simplifications_within_budget(tempered, count)?.0)
+    }
+
+    /// [`simplifications`](Self::simplifications), and whether the search closed
+    /// rather than running out of [`MAX_SEARCH_NODES`]. Only a test reads the flag.
+    pub(crate) fn simplifications_within_budget(
+        &self,
+        tempered: &[i64],
+        count: usize,
+    ) -> Result<(Matrix<i64>, bool), Error> {
         let interval = self.temperament.preimage(tempered)?;
         if self.lattice.is_empty() {
-            return Ok(if count == 0 { vec![] } else { vec![interval] });
+            let simplifications = if count == 0 { vec![] } else { vec![interval] };
+            return Ok((simplifications, true));
         }
-        Ok(cvp_l1_top_k(&interval, &self.lattice, &self.primes, count)?
+        let (commas, complete) = cvp_l1_top_k(
+            &interval,
+            &self.lattice,
+            &self.primes,
+            count,
+            Some(MAX_SEARCH_NODES),
+        )?;
+        let simplifications = commas
             .iter()
             .map(|comma| subtract(&interval, comma))
-            .collect())
+            .collect();
+        Ok((simplifications, complete))
     }
 
     /// [`simplifications`](Self::simplifications) of the tempered interval a
@@ -141,6 +164,23 @@ mod tests {
     fn simplified(notation: &Notation, simplifier: &Simplifier, interval: &[i64]) -> (u64, u64) {
         let simplified = simplifier.simplify_interval(interval).unwrap();
         notation.subgroup().to_ratio(&simplified).unwrap()
+    }
+
+    #[test]
+    fn a_target_too_far_to_search_still_answers() {
+        // Past the budget the answer is the best found rather than the simplest
+        // there is, but it is still a just interval that tempers to what was
+        // asked for, and it still comes back quickly.
+        let subgroup: Subgroup = "2.3.5.7.11".parse().unwrap();
+        let t = Temperament::equal(41, &subgroup).unwrap();
+        let s = Simplifier::new(&t);
+        for steps in [1_000_000i64, 100_000_000] {
+            let simplifications = s.simplifications(&[steps], 3).unwrap();
+            assert!(!simplifications.is_empty());
+            for interval in &simplifications {
+                assert_eq!(t.temper(interval).unwrap(), vec![steps]);
+            }
+        }
     }
 
     #[test]
@@ -211,7 +251,7 @@ mod tests {
         let tempered = notation.temperament().temper(&stack(&notation, 1)).unwrap();
         let interval = notation.temperament().preimage(&tempered).unwrap();
         let weights = notation.subgroup().weights();
-        let closest = cvp_exact(&interval, simplifier.lattice(), &weights).unwrap();
+        let (closest, _) = cvp_exact(&interval, simplifier.lattice(), &weights, None).unwrap();
         let seed = subtract(&interval, &closest);
         assert_eq!(notation.subgroup().to_ratio(&seed).unwrap(), (45, 44));
     }

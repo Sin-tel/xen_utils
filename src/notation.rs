@@ -7,7 +7,7 @@ use crate::notation_options::NotationOptions;
 use crate::primes::Subgroup;
 use crate::temperament::Temperament;
 use crate::tuning::Tuning;
-use crate::util::{LLL_DELTA, column, combination, first_column, subtract};
+use crate::util::{LLL_DELTA, MAX_SEARCH_NODES, column, combination, first_column, subtract};
 
 /// The nominals, in order of the fifth chain.
 /// Nominals for note at `f` fifths spells `NOMINALS[(f + 1) mod 7]`.
@@ -340,10 +340,24 @@ impl Notation {
     /// then to the enharmonic. At least one, and exact, so the search only
     /// closes once it holds `count` spellings: ask for the handful wanted.
     ///
+    /// Exact within [`MAX_SEARCH_NODES`]. A tempered
+    /// interval absurdly far from a unison exhausts that budget and is answered
+    /// with the best spellings found, which may be fewer than `count`.
+    ///
     /// # Errors
     /// Returns [`Error::InvalidDimensions`] if `tempered` does not have one
     /// entry per generator of the temperament.
     pub fn spellings(&self, tempered: &[i64], count: usize) -> Result<Matrix<i64>, Error> {
+        Ok(self.spellings_within_budget(tempered, count)?.0)
+    }
+
+    /// [`spellings`](Self::spellings), and whether the search closed rather than
+    /// running out of [`MAX_SEARCH_NODES`]. Only a test reads the flag.
+    pub(crate) fn spellings_within_budget(
+        &self,
+        tempered: &[i64],
+        count: usize,
+    ) -> Result<(Matrix<i64>, bool), Error> {
         let rank = self.temperament.rank();
         if tempered.len() != rank {
             return Err(Error::InvalidDimensions(format!(
@@ -406,7 +420,7 @@ impl Notation {
                 .expect("accidental can always be tempered");
             target.push(nominal.degree);
             let spelling = match solve_diophantine(&transpose(&with_degree), &column(&target)) {
-                Ok(solution) => Some(cheapest(&first_column(&solution), &level, 1).remove(0)),
+                Ok(solution) => Some(cheapest(&first_column(&solution), &level, 1).0.remove(0)),
                 Err(_) => None,
             };
             spellings.push(spelling);
@@ -652,18 +666,26 @@ fn spelling_cost_weights(len: usize) -> Vec<i64> {
 /// [`spelling_cost`] is a weighted L1 norm, so this is an exact closest vector
 /// search under it. Ties go to the quadratic form, then to the lattice vector.
 /// `lattice` should be reduced under [`spelling_cost_l2`] for speed.
-fn cheapest(spelling: &[i64], lattice: &Matrix<i64>, count: usize) -> Matrix<i64> {
+fn cheapest(spelling: &[i64], lattice: &Matrix<i64>, count: usize) -> (Matrix<i64>, bool) {
     if lattice.is_empty() {
-        return vec![spelling.to_vec()];
+        return (vec![spelling.to_vec()], true);
     }
     let mut centred = spelling.to_vec();
     centred[1] -= NOMINAL_CENTRE;
     let weights = spelling_cost_weights(spelling.len());
-    cvp_l1_top_k(&centred, lattice, &weights, count.max(1))
-        .expect("no overflow occurs for any reasonable temperament")
+    let (enharmonics, complete) = cvp_l1_top_k(
+        &centred,
+        lattice,
+        &weights,
+        count.max(1),
+        Some(MAX_SEARCH_NODES),
+    )
+    .expect("no overflow occurs for any reasonable temperament");
+    let spellings = enharmonics
         .iter()
         .map(|enharmonic| subtract(spelling, enharmonic))
-        .collect()
+        .collect();
+    (spellings, complete)
 }
 
 /// Whether generators with these `images` reach every tempered interval of a
@@ -698,6 +720,7 @@ fn spelling_cost_l2(len: usize) -> Matrix<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Simplifier;
 
     fn notation(subgroup: &str) -> Notation {
         Notation::from_ji(&subgroup.parse::<Subgroup>().unwrap()).unwrap()
@@ -869,6 +892,52 @@ mod tests {
         // notated: the octave, the fifth and one accidental per prime beyond 3.
         assert_eq!(Notation::from_ji(&Subgroup::p_limit(41)).unwrap().len(), 13);
         assert!(Notation::from_ji(&Subgroup::p_limit(43)).is_err());
+    }
+
+    #[test]
+    fn nothing_musical_runs_out_of_budget() {
+        // The budget is a safety valve for absurd input, so an ordinary note
+        // must never reach it: within a few octaves every search must close.
+        let mut checked = 0;
+        for divisions in 5..=100 {
+            for sub in ["2.3.5", "2.3.5.7", "2.3.5.7.11"] {
+                let subgroup: Subgroup = sub.parse().unwrap();
+                let Ok(t) = Temperament::equal(divisions, &subgroup) else {
+                    continue;
+                };
+                let Ok(n) = Notation::from_temperament(&t) else {
+                    continue;
+                };
+                let simplifier = Simplifier::new(&t);
+                for steps in [-2 * divisions, -divisions, 0, divisions, 4 * divisions] {
+                    let (_, complete) = n.spellings_within_budget(&[steps], 3).unwrap();
+                    assert!(complete, "spelling {steps} of {divisions}et over {sub}");
+                    let (_, complete) = simplifier
+                        .simplifications_within_budget(&[steps], 3)
+                        .unwrap();
+                    assert!(complete, "simplifying {steps} of {divisions}et over {sub}");
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked > 500, "only {checked} searches swept");
+    }
+
+    #[test]
+    fn a_target_too_far_to_search_still_answers() {
+        // Past the budget the answers are the best found rather than the best
+        // there is, and there may be fewer of them - but they are still
+        // spellings of what was asked for, and they still come back quickly.
+        let subgroup: Subgroup = "2.3.5.7.11".parse().unwrap();
+        let t = Temperament::equal(41, &subgroup).unwrap();
+        let n = Notation::from_temperament(&t).unwrap();
+        for steps in [1_000_000i64, 1_000_000_000, i64::MAX / 2] {
+            let spellings = n.spellings(&[steps], 3).unwrap();
+            assert!(!spellings.is_empty());
+            for spelling in &spellings {
+                assert_eq!(n.temper(spelling).unwrap(), vec![steps]);
+            }
+        }
     }
 
     #[test]

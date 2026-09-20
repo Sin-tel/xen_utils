@@ -9,6 +9,10 @@ use diophantine::Matrix;
 /// The Lovasz condition for every lattice reduction here, the usual `0.99`.
 pub const LLL_DELTA: f64 = 0.99;
 
+/// How many nodes either lattice search may enumerate before it gives up and
+/// answers with the best it has found.
+pub const MAX_SEARCH_NODES: u64 = 100_000;
+
 /// The combination of `generators` given by `counts`, as a vector of `dim`
 /// entries.
 pub fn combination(counts: &[i64], generators: &Matrix<i64>, dim: usize) -> Vec<i64> {

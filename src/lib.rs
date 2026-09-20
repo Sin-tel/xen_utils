@@ -25,3 +25,4 @@ pub use primes::Subgroup;
 pub use simplify::Simplifier;
 pub use temperament::Temperament;
 pub use tuning::Tuning;
+pub use util::MAX_SEARCH_NODES;
