@@ -659,7 +659,7 @@ fn cheapest(spelling: &[i64], lattice: &Matrix<i64>, count: usize) -> Matrix<i64
     centred[1] -= NOMINAL_CENTRE;
     let weights = spelling_cost_weights(spelling.len());
     cvp_l1_top_k(&centred, lattice, &weights, count.max(1))
-        .expect("no overflow occurs for reasonable temperants")
+        .expect("no overflow occurs for any reasonable temperament")
         .iter()
         .map(|enharmonic| subtract(spelling, enharmonic))
         .collect()
