@@ -17,25 +17,20 @@ const NOMINALS: [char; 7] = ['F', 'C', 'G', 'D', 'A', 'E', 'B'];
 const CENTRE_OCTAVE: i64 = 5;
 
 /// Raising and lowering symbols for each accidental.
-/// These exist only so that [`Notation::note`] can print something legible;
-/// real microtonal accidentals are not in unicode, so anything that has to
-/// look right should render the notation coordinates itself.
-const PRIME_SYMBOLS: [(u32, char, char); 6] = [
-    (5, '^', 'v'),
-    (7, '>', '<'),
-    (11, 't', 'd'),
-    (13, '*', '%'),
-    (17, '/', '\\'),
-    (19, ')', '('),
+/// These are just arbitrary debug symbols. We have 11 symbols, so max 41-limit JI.
+const ACCIDENTAL_SYMBOLS: [(char, char); 11] = [
+    ('^', 'v'),
+    ('>', '<'),
+    ('t', 'd'),
+    ('/', '\\'),
+    ('+', '~'),
+    ('*', '%'),
+    ('\'', ','),
+    ('!', '?'),
+    ('(', ')'),
+    ('[', ']'),
+    ('{', '}'),
 ];
-
-/// Arbitrary symbols for primes beyond [`PRIME_SYMBOLS`], handed out in order.
-/// Past these, pairs of Greek letters and then CJK ideographs, which never run out.
-const FALLBACK_SYMBOLS: [(char, char); 5] =
-    [('!', '?'), ('[', ']'), ('{', '}'), ('+', '~'), ('\'', ',')];
-
-/// Characters [`Notation::note`] uses for something else, so no accidental may.
-const RESERVED_SYMBOLS: &str = "FCGDAEB#b-0123456789";
 
 /// The largest interval, in cents, that counts as an accidental:
 /// half an apotome, about 56.8 cents.
@@ -43,15 +38,6 @@ const RESERVED_SYMBOLS: &str = "FCGDAEB#b-0123456789";
 /// This lets every prime be written without augmented or diminished intervals.
 /// 1200*log2(sqrt(2187/2048))
 const MAX_ACCIDENTAL_CENTS: f64 = 56.842_503_028_855_52;
-
-/// An accidental, raising or lowering a note by a small interval.
-#[derive(Debug, Clone)]
-pub struct Accidental {
-    /// The interval vector of the accidental.
-    pub vector: Vec<i64>,
-    /// The raising and lowering symbols.
-    pub symbols: (char, char),
-}
 
 /// A notation system: a set of symbols, and what each one maps to in the temperament.
 ///
@@ -106,7 +92,7 @@ impl Notation {
     /// Builds the recommended notation of `temperament` given a set of `accidentals`.
     pub fn from_temperament_with(
         temperament: &Temperament,
-        accidentals: &[Accidental],
+        accidentals: &[Vec<i64>],
     ) -> Result<Self, Error> {
         let options = Notation::options_with(temperament, accidentals)?;
         for option in &options {
@@ -146,7 +132,7 @@ impl Notation {
     /// [`options`](Self::options) over the given `accidentals`.
     pub fn options_with(
         temperament: &Temperament,
-        accidentals: &[Accidental],
+        accidentals: &[Vec<i64>],
     ) -> Result<Vec<Self>, Error> {
         NotationOptions::new(temperament, accidentals)?.search()
     }
@@ -158,7 +144,7 @@ impl Notation {
     /// Returns [`Error::Unsupported`] if no `count` of them make a notation.
     pub fn with_count(
         temperament: &Temperament,
-        accidentals: &[Accidental],
+        accidentals: &[Vec<i64>],
         count: usize,
     ) -> Result<Self, Error> {
         NotationOptions::new(temperament, accidentals)?.with_count(count)
@@ -176,13 +162,12 @@ impl Notation {
     /// interval.
     pub(crate) fn from_accidentals(
         temperament: &Temperament,
-        accidentals: &[Accidental],
+        accidentals: &[Vec<i64>],
     ) -> Result<Self, Error> {
         let subgroup = temperament.subgroup();
-        check_symbols(accidentals)?;
 
         let mut generators = fifth_chain(subgroup.dim());
-        generators.extend(accidentals.iter().map(|a| a.vector.clone()));
+        generators.extend(accidentals.to_vec());
         let images = temperament.temper_all(&generators)?;
         if !spans(&images, temperament.rank()) {
             return Err(Error::Unsupported(format!(
@@ -199,9 +184,20 @@ impl Notation {
 
         let tuning = Tuning::weil_euclidean(temperament)?;
         let pitches = generator_pitches(&images, &tuning)?;
+
+        if accidentals.len() > ACCIDENTAL_SYMBOLS.len() {
+            return Err(Error::Unsupported("Too many accidentals.".into()));
+        }
+
+        let symbols = ACCIDENTAL_SYMBOLS
+            .iter()
+            .take(accidentals.len())
+            .cloned()
+            .collect();
+
         Ok(Notation {
             generators,
-            accidentals: accidentals.iter().map(|a| a.symbols).collect(),
+            accidentals: symbols,
             images,
             enharmonics,
             weights,
@@ -333,7 +329,7 @@ impl Notation {
     /// Returns [`Error::InvalidDimensions`] if `tempered` does not have one
     /// entry per generator of the temperament, and [`Error::Unsupported`] if
     /// the notation cannot write it.
-    pub fn spellings(&self, tempered: &[i64], count: usize) -> Result<Vec<Vec<i64>>, Error> {
+    pub fn spellings(&self, tempered: &[i64], count: usize) -> Result<Matrix<i64>, Error> {
         let rank = self.temperament.rank();
         if tempered.len() != rank {
             return Err(Error::InvalidDimensions(format!(
@@ -353,11 +349,7 @@ impl Notation {
     /// Returns [`Error::InvalidDimensions`] if `interval` does not have one
     /// entry per basis element of the subgroup, and [`Error::Unsupported`] if
     /// the notation cannot write it.
-    pub fn spellings_interval(
-        &self,
-        interval: &[i64],
-        count: usize,
-    ) -> Result<Vec<Vec<i64>>, Error> {
+    pub fn spellings_interval(&self, interval: &[i64], count: usize) -> Result<Matrix<i64>, Error> {
         self.spellings(&self.temperament.temper(interval)?, count)
     }
 
@@ -564,59 +556,12 @@ pub(crate) fn just_nominals(subgroup: &Subgroup) -> Result<Vec<JustNominal>, Err
 }
 
 /// Derives the default accidentals for a subgroup.
-pub fn derive_accidentals(subgroup: &Subgroup) -> Result<Vec<Accidental>, Error> {
+pub fn derive_accidentals(subgroup: &Subgroup) -> Result<Matrix<i64>, Error> {
     let mut result = Vec::new();
-    let mut fallbacks = 0;
     for index in 2..subgroup.dim() {
-        let vector = derive_accidental_vector(subgroup, index)?;
-        let prime = subgroup.basis()[index];
-        let symbols = match PRIME_SYMBOLS.iter().find(|&&(p, ..)| p == prime) {
-            Some(&(_, up, down)) => (up, down),
-            None => {
-                fallbacks += 1;
-                fallback_symbols(fallbacks - 1)
-            }
-        };
-        result.push(Accidental { vector, symbols });
+        result.push(derive_accidental_vector(subgroup, index)?);
     }
     Ok(result)
-}
-
-/// The `n`th pair of arbitrary symbols for a prime with no symbol of its own.
-fn fallback_symbols(n: usize) -> (char, char) {
-    const GREEK_PAIRS: usize = 12;
-    let pair = |start: u32, k: usize| {
-        let up = char::from_u32(start + 2 * k as u32).expect("a valid code point");
-        let down = char::from_u32(start + 2 * k as u32 + 1).expect("a valid code point");
-        (up, down)
-    };
-    match n.checked_sub(FALLBACK_SYMBOLS.len()) {
-        None => FALLBACK_SYMBOLS[n],
-        Some(k) if k < GREEK_PAIRS => pair('α' as u32, k),
-        Some(k) => pair(0x4E00, k - GREEK_PAIRS),
-    }
-}
-
-/// Checks that every symbol of `accidentals` is distinct, and that none of
-/// them is a character [`Notation::note`] already uses.
-fn check_symbols(accidentals: &[Accidental]) -> Result<(), Error> {
-    let symbols: Vec<char> = accidentals
-        .iter()
-        .flat_map(|a| [a.symbols.0, a.symbols.1])
-        .collect();
-    for (index, &symbol) in symbols.iter().enumerate() {
-        if RESERVED_SYMBOLS.contains(symbol) {
-            return Err(Error::Unsupported(format!(
-                "accidental symbol '{symbol}' is already used for nominals, sharps, flats or octaves"
-            )));
-        }
-        if symbols[..index].contains(&symbol) {
-            return Err(Error::Unsupported(format!(
-                "accidental symbol '{symbol}' is used more than once"
-            )));
-        }
-    }
-    Ok(())
 }
 
 /// How far up and down the fifth chain to look for an accidental.
@@ -626,8 +571,8 @@ const MAX_FIFTH_OFFSET: i64 = 12;
 /// detour along the fifth chain that lands within [`MAX_ACCIDENTAL_CENTS`] of
 /// the prime.
 ///
-/// The candidates are the prime shifted by 0, 1, -1, 2, -2, .. fifths, each
-/// reduced by octaves. The first one small enough wins, returned as an
+/// The prime is compared to an interval of 0, 1, -1, 2, -2, .. fifths,
+/// each reduced by octaves. The first one small enough wins, returned as an
 /// ascending interval.
 /// This gives `81/80` for 5, `64/63` for 7 and `33/32` for 11.
 ///
@@ -642,7 +587,8 @@ pub(crate) fn derive_accidental_vector(
     for offset in offsets {
         let mut interval = vec![0i64; subgroup.dim()];
         interval[index] = 1;
-        interval[1] = offset;
+        // We subtract k fifths, so negative
+        interval[1] = -offset;
 
         // Octave reduction: whichever power of two lands closest to unison.
         interval[0] = -(subgroup.to_cents(&interval) / 1200.0).round_ties_even() as i64;
@@ -697,7 +643,7 @@ fn spelling_cost_weights(len: usize) -> Vec<i64> {
 /// [`spelling_cost`] is a weighted L1 norm, so this is an exact closest vector
 /// search under it. Ties go to the quadratic form, then to the lattice vector.
 /// `lattice` should be reduced under [`spelling_cost_l2`] for speed.
-fn cheapest(spelling: &[i64], lattice: &Matrix<i64>, count: usize) -> Result<Vec<Vec<i64>>, Error> {
+fn cheapest(spelling: &[i64], lattice: &Matrix<i64>, count: usize) -> Result<Matrix<i64>, Error> {
     if lattice.is_empty() {
         return Ok(vec![spelling.to_vec()]);
     }
@@ -885,8 +831,9 @@ mod tests {
 
     #[test]
     fn accidentals_match_fjs() {
-        let n = notation("2.3.5.7.11.13.17.19");
-
+        let n = notation("2.3.5.7.11.13.17.19.23.29.31.37.41");
+        // Note we always use ascending intervals, unlike FJS which only uses otonal ones.
+        // We also use sqrt(2187/2048) instead of the original 65/63, which only changes prime 31.
         let fjs_accidentals = [
             (81, 80),
             (64, 63),
@@ -894,6 +841,11 @@ mod tests {
             (1053, 1024),
             (4131, 4096),
             (513, 512),
+            (736, 729),
+            (261, 256),
+            (32, 31),
+            (37, 36),
+            (82, 81),
         ];
         for (i, a) in n.generators()[2..].iter().enumerate() {
             let ratio = n.subgroup().to_ratio(a).unwrap();
@@ -904,8 +856,8 @@ mod tests {
     #[test]
     fn notes_with_accidentals() {
         assert_eq!(note_of(&notation("2.3.5"), 5, 4), "vE5");
-        assert_eq!(note_of(&notation("2.3.7"), 7, 4), "<Bb5");
-        assert_eq!(note_of(&notation("2.3.11"), 11, 8), "tF5");
+        assert_eq!(note_of(&notation("2.3.7"), 7, 4), "vBb5");
+        assert_eq!(note_of(&notation("2.3.11"), 11, 8), "^F5");
 
         let n = notation("2.3.5.7.11");
         assert_eq!(note_of(&n, 5, 4), "vE5");
@@ -962,7 +914,7 @@ mod tests {
         let n = tempered("2.3.5.7", &[(81, 80), (225, 224)]);
         assert_eq!(accidental_ratios(&n), vec![(64, 63)]);
         assert_eq!(note_of(&n, 5, 4), "E5");
-        assert_eq!(note_of(&n, 7, 4), "<Bb5");
+        assert_eq!(note_of(&n, 7, 4), "vBb5");
     }
 
     #[test]
@@ -988,7 +940,7 @@ mod tests {
         assert_eq!(note_of(&options[0], 5, 4), "E5");
         assert_eq!(note_of(&options[1], 5, 4), "E5");
         assert_eq!(note_of(&options[0], 7, 4), "A#5");
-        assert_eq!(note_of(&options[1], 7, 4), "<Bb5");
+        assert_eq!(note_of(&options[1], 7, 4), "vBb5");
     }
 
     #[test]
@@ -1038,7 +990,7 @@ mod tests {
         assert_eq!(note_of(&options[0], 5, 4), "E5");
         assert_eq!(note_of(&options[0], 7, 4), "A#5");
         assert_eq!(accidental_ratios(&options[1]), vec![(64, 63)]);
-        assert_eq!(note_of(&options[1], 7, 4), "<Bb5");
+        assert_eq!(note_of(&options[1], 7, 4), "vBb5");
     }
 
     #[test]
@@ -1054,8 +1006,7 @@ mod tests {
         assert_eq!(note_of(&options[1], 7, 4), "vBb5");
         assert_eq!(note_of(&options[1], 11, 8), "^^F5");
         assert_eq!(accidental_ratios(&options[2]), vec![(81, 80), (33, 32)]);
-        // 11 keeps its own t/d now that it shares the notation with 5.
-        assert_eq!(note_of(&options[2], 11, 8), "tF5");
+        assert_eq!(note_of(&options[2], 11, 8), ">F5");
 
         // 72et needs its step, since its fifth chain closes early, and has two
         // further accidentals on top: 64/63 is worth two steps and 33/32 three.
@@ -1088,11 +1039,11 @@ mod tests {
         assert_eq!(accidental_ratios(&options[0]), vec![(81, 80)]);
         assert_eq!(note_of(&options[0], 7, 4), "vBb5");
 
-        // 31et is the same story one prime up: 33/32 is worth what 64/63 is.
+        // 31et is the same story one prime up: 33/32 ~ 64/63 is.
         let options = et_options(31, "2.3.5.7.11");
         assert_eq!(ranks(&options), vec![2, 3]);
         assert_eq!(accidental_ratios(&options[1]), vec![(64, 63)]);
-        assert_eq!(note_of(&options[1], 11, 8), ">F5");
+        assert_eq!(note_of(&options[1], 11, 8), "^F5");
     }
 
     #[test]
@@ -1135,8 +1086,7 @@ mod tests {
         assert_eq!(ranks(&options), vec![3]);
         assert_eq!(accidental_ratios(&options[0]), vec![(33, 32)]);
         assert_eq!(note_of(&options[0], 5, 4), "E5");
-        // The sole accidental is the quartertone itself, so it is t/d.
-        assert_eq!(note_of(&options[0], 11, 8), "tF5");
+        assert_eq!(note_of(&options[0], 11, 8), "^F5");
     }
 
     #[test]
@@ -1175,9 +1125,8 @@ mod tests {
             assert_eq!(note_of(n, 5, 4), "E5");
         }
         assert_eq!(note_of(&options[0], 7, 4), "A#5");
-        assert_eq!(note_of(&options[1], 7, 4), "<Bb5");
-        // 11 keeps t/d once 7 is kept alongside it too.
-        assert_eq!(note_of(&options[2], 11, 8), "tF5");
+        assert_eq!(note_of(&options[1], 7, 4), "vBb5");
+        assert_eq!(note_of(&options[2], 11, 8), ">F5");
     }
 
     #[test]
@@ -1419,7 +1368,7 @@ mod tests {
         // Every derived accidental has degree zero under it.
         let map: Vec<i64> = [7, 11].into_iter().chain(degrees).collect();
         for a in derive_accidentals(&subgroup).unwrap() {
-            let dot: i64 = a.vector.iter().zip(&map).map(|(x, d)| x * d).sum();
+            let dot: i64 = a.iter().zip(&map).map(|(x, d)| x * d).sum();
             assert_eq!(dot, 0);
         }
     }
@@ -1438,7 +1387,7 @@ mod tests {
         // 41et's largest notation writes 7/4 as tA, but vBb is there too, at
         // what just intonation spends on it, so the nominals are kept.
         let options = et_options(41, "2.3.5.7.11");
-        assert_eq!(note_of(&options[2], 7, 4), "tA5");
+        assert_eq!(note_of(&options[2], 7, 4), ">A5");
         assert_eq!(options[2].nominal_costs().unwrap()[1], Some(15));
         assert!(options[2].keeps_nominals().unwrap());
     }
@@ -1489,10 +1438,8 @@ mod tests {
         // Only the images matter: in 41et 49/48 is a step as good as 81/80.
         let subgroup: Subgroup = "2.3.5.7".parse().unwrap();
         let t = Temperament::equal(41, &subgroup).unwrap();
-        let septimal = Accidental {
-            vector: subgroup.factorize(49, 48).unwrap(),
-            symbols: ('^', 'v'),
-        };
+        let septimal = subgroup.factorize(49, 48).unwrap();
+
         let n = Notation::with_count(&t, &[septimal], 1).unwrap();
         let syntonic =
             Notation::with_count(&t, &derive_accidentals(&subgroup).unwrap()[..1], 1).unwrap();
@@ -1501,34 +1448,6 @@ mod tests {
             n.nominal_costs().unwrap(),
             syntonic.nominal_costs().unwrap()
         );
-    }
-
-    #[test]
-    fn primes_beyond_the_table_get_arbitrary_symbols() {
-        // Past 19 the symbols are arbitrary, but every one is still distinct:
-        // enough primes to run through the ASCII and Greek pools and into CJK.
-        let n = Notation::from_ji(&Subgroup::p_limit(199)).unwrap();
-        assert_eq!(n.accidentals.len(), 44);
-        assert!(check_symbols(&derive_accidentals(n.subgroup()).unwrap()).is_ok());
-        assert_eq!(note_of(&notation("2.3.23"), 23, 16), "!Gb5");
-    }
-
-    #[test]
-    fn colliding_symbols_are_refused() {
-        let subgroup: Subgroup = "2.3.5.7".parse().unwrap();
-        let temperament = Temperament::from_ji(&subgroup).unwrap();
-        let mut accidentals = derive_accidentals(&subgroup).unwrap();
-        assert!(Notation::from_accidentals(&temperament, &accidentals).is_ok());
-
-        // The same symbol for two accidentals.
-        accidentals[1].symbols = ('^', '<');
-        assert!(Notation::from_accidentals(&temperament, &accidentals).is_err());
-        // Raising and lowering with one symbol.
-        accidentals[1].symbols = ('>', '>');
-        assert!(Notation::from_accidentals(&temperament, &accidentals).is_err());
-        // A flat.
-        accidentals[1].symbols = ('>', 'b');
-        assert!(Notation::from_accidentals(&temperament, &accidentals).is_err());
     }
 
     #[test]
@@ -1627,10 +1546,7 @@ mod tests {
         assert!(Notation::options(&temperament).is_err());
 
         // But we can supply 25/24 as a custom accidental.
-        let custom_acc = Accidental {
-            vector: subgroup.factorize(25, 24).unwrap(),
-            symbols: ('^', 'v'),
-        };
+        let custom_acc = subgroup.factorize(25, 24).unwrap();
 
         let options = Notation::options_with(&temperament, &[custom_acc]).unwrap();
         assert_eq!(ranks(&options), vec![3]);
@@ -1643,15 +1559,8 @@ mod tests {
         let temperament = Temperament::equal(41, &subgroup).unwrap();
 
         // We can notate using a single accidental for 49/48 or 50/49.
-        let acc_49_48 = Accidental {
-            vector: subgroup.factorize(49, 48).unwrap(),
-            symbols: ('^', 'v'),
-        };
-
-        let acc_50_49 = Accidental {
-            vector: subgroup.factorize(50, 49).unwrap(),
-            symbols: ('^', 'v'),
-        };
+        let acc_49_48 = subgroup.factorize(49, 48).unwrap();
+        let acc_50_49 = subgroup.factorize(50, 49).unwrap();
 
         let options_49_48 =
             Notation::options_with(&temperament, std::slice::from_ref(&acc_49_48)).unwrap();

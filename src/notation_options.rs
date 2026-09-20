@@ -1,13 +1,13 @@
 use diophantine::Matrix;
 
 use crate::Error;
-use crate::notation::{Accidental, Notation, fifth_chain, spans};
+use crate::notation::{Notation, fifth_chain, spans};
 use crate::temperament::Temperament;
 use crate::util::{is_zero, select};
 
 pub(crate) struct NotationOptions<'a> {
     temperament: &'a Temperament,
-    accidentals: Vec<Accidental>,
+    accidentals: Matrix<i64>,
     /// What each accidental maps to in the temperament.
     images: Matrix<i64>,
 }
@@ -17,9 +17,9 @@ impl<'a> NotationOptions<'a> {
     /// worth what an earlier one is worth, up to direction.
     pub(crate) fn new(
         temperament: &'a Temperament,
-        accidentals: &[Accidental],
+        accidentals: &[Vec<i64>],
     ) -> Result<Self, Error> {
-        let vectors: Matrix<i64> = accidentals.iter().map(|a| a.vector.clone()).collect();
+        let vectors: Matrix<i64> = accidentals.to_vec();
         let images = temperament.temper_all(&vectors)?;
         let mut useful: Vec<usize> = Vec::new();
         for index in 0..images.len() {
@@ -77,7 +77,7 @@ impl<'a> NotationOptions<'a> {
             if !self.valid(&subset)? {
                 continue;
             }
-            let kept: Vec<Accidental> = subset
+            let kept: Vec<Vec<i64>> = subset
                 .iter()
                 .map(|&i| self.accidentals[i].clone())
                 .collect();
@@ -105,7 +105,7 @@ impl<'a> NotationOptions<'a> {
             return Ok(false);
         }
         let mut generators = fifth_chain(self.temperament.dim());
-        generators.extend(keep.iter().map(|&i| self.accidentals[i].vector.clone()));
+        generators.extend(keep.iter().map(|&i| self.accidentals[i].clone()));
         let images = self.temperament.temper_all(&generators)?;
         Ok(spans(&images, self.temperament.rank()))
     }
