@@ -82,7 +82,7 @@ impl<'a> NotationOptions<'a> {
                 .map(|&i| self.accidentals[i].clone())
                 .collect();
             let notation = Notation::build(self.temperament, &kept)?;
-            let score = Score::of(&notation)?;
+            let score = Score::of(&notation);
             if best.as_ref().is_none_or(|(held, _)| score < *held) {
                 best = Some((score, notation));
             }
@@ -139,9 +139,9 @@ struct Score {
 }
 
 impl Score {
-    fn of(notation: &Notation) -> Result<Self, Error> {
-        let verdict = notation.nominal_verdict()?;
-        Ok(Score {
+    fn of(notation: &Notation) -> Self {
+        let verdict = notation.nominal_verdict();
+        Score {
             failures: verdict.failures,
             total: verdict.costs.iter().copied().sum::<Option<i64>>(),
             costs: verdict
@@ -149,7 +149,7 @@ impl Score {
                 .iter()
                 .map(|c| c.unwrap_or(i64::MAX))
                 .collect(),
-        })
+        }
     }
 }
 

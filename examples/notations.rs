@@ -136,9 +136,7 @@ fn parse_temperament(definition: &str, subgroup: &Subgroup) -> Result<Temperamen
 /// nominal, with what `spell` chooses where that differs.
 fn spelling(notation: &Notation) -> String {
     let subgroup = notation.subgroup();
-    let nominal = notation
-        .nominal_spellings()
-        .expect("every prime has an accidental");
+    let nominal = notation.nominal_spellings();
     let mut cell = format!("[{}]", notation.len());
     for (index, on_nominal) in (2..subgroup.dim()).zip(nominal) {
         let harmonic = octave_reduce(subgroup, index);

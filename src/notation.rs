@@ -74,7 +74,7 @@ impl Notation {
     /// # Errors
     /// Returns [`Error::Unsupported`] if some prime has no accidental.
     pub fn from_ji(subgroup: &Subgroup) -> Result<Self, Error> {
-        let accidentals = derive_accidentals(subgroup)?;
+        let accidentals = derive_accidentals(subgroup);
         Notation::build(&Temperament::from_ji(subgroup)?, &accidentals)
     }
 
@@ -88,7 +88,7 @@ impl Notation {
     pub fn from_temperament(temperament: &Temperament) -> Result<Self, Error> {
         Self::from_temperament_with_accidentals(
             temperament,
-            &derive_accidentals(temperament.subgroup())?,
+            &derive_accidentals(temperament.subgroup()),
         )
     }
 
@@ -99,7 +99,7 @@ impl Notation {
     ) -> Result<Self, Error> {
         let options = Notation::options_with_accidentals(temperament, accidentals)?;
         for option in &options {
-            if option.keeps_nominals()? {
+            if option.keeps_nominals() {
                 return Ok(option.clone());
             }
         }
@@ -129,7 +129,7 @@ impl Notation {
     /// not reach every note and which has no accidental worth a single step of
     /// it has none.
     pub fn options(temperament: &Temperament) -> Result<Vec<Self>, Error> {
-        Self::options_with_accidentals(temperament, &derive_accidentals(temperament.subgroup())?)
+        Self::options_with_accidentals(temperament, &derive_accidentals(temperament.subgroup()))
     }
 
     /// [`options`](Self::options) over the given `accidentals`.
@@ -148,7 +148,7 @@ impl Notation {
     pub fn with_count(temperament: &Temperament, count: usize) -> Result<Self, Error> {
         Self::with_count_and_accidentals(
             temperament,
-            &derive_accidentals(temperament.subgroup())?,
+            &derive_accidentals(temperament.subgroup()),
             count,
         )
     }
@@ -191,11 +191,11 @@ impl Notation {
         // The written notes that map to unison.
         // Reduced so the CVP search has a good basis to work with.
         let weights = spelling_cost_l2(generators.len());
-        let enharmonics = kernel_left(&images)?;
+        let enharmonics = kernel_left(&images).expect("kernel is valid");
         let enharmonics = lll(&enharmonics, LLL_DELTA, &weights).unwrap_or(enharmonics);
 
         let tuning = Tuning::weil_euclidean(temperament)?;
-        let pitches = generator_pitches(&images, &tuning)?;
+        let pitches = generator_pitches(&images, &tuning).expect("pitches are valid");
 
         if accidentals.len() > ACCIDENTAL_SYMBOLS.len() {
             return Err(Error::Unsupported("Too many accidentals.".into()));
@@ -351,7 +351,7 @@ impl Notation {
         }
         let solution = solve_diophantine(&transpose(&self.images), &column(tempered))
             .map_err(|_| Error::Unsupported(format!("{tempered:?} cannot be written")))?;
-        cheapest(&first_column(&solution), &self.enharmonics, count)
+        Ok(cheapest(&first_column(&solution), &self.enharmonics, count))
     }
 
     /// [`spellings`](Self::spellings) of the tempered interval a just interval
@@ -375,10 +375,7 @@ impl Notation {
     /// This asks for the prime on its letter, whatever [`spell`](Self::spell)
     /// would choose: 41et's largest notation spells `7/4` as `tA`, but writes
     /// it on its nominal as `vBb`.
-    ///
-    /// # Errors
-    /// Returns [`Error::Unsupported`] if some prime has no accidental.
-    pub fn nominal_spellings(&self) -> Result<Vec<Option<Vec<i64>>>, Error> {
+    pub fn nominal_spellings(&self) -> Vec<Option<Vec<i64>>> {
         // The notation coordinates and their degree side by side, so that one
         // solve finds a spelling of the right tempered interval at the right degree.
         let with_degree: Matrix<i64> = self
@@ -392,34 +389,33 @@ impl Notation {
             })
             .collect();
         // The enharmonics that keep the degree, reduced for the search.
-        let level = kernel_left(&with_degree)?;
+        let level = kernel_left(&with_degree).expect("the kernel is always valid");
         let level = lll(&level, LLL_DELTA, &self.weights).unwrap_or(level);
 
         let mut spellings = Vec::new();
-        for (index, nominal) in (2..self.dim()).zip(just_nominals(self.subgroup())?) {
+        for (index, nominal) in (2..self.dim()).zip(just_nominals(self.subgroup())) {
             let mut prime = vec![0i64; self.dim()];
             prime[index] = 1;
-            let mut target = self.temperament.temper(&prime)?;
+            let mut target = self
+                .temperament
+                .temper(&prime)
+                .expect("accidental can always be tempered");
             target.push(nominal.degree);
             let spelling = match solve_diophantine(&transpose(&with_degree), &column(&target)) {
-                Ok(solution) => Some(cheapest(&first_column(&solution), &level, 1)?.remove(0)),
+                Ok(solution) => Some(cheapest(&first_column(&solution), &level, 1).remove(0)),
                 Err(_) => None,
             };
             spellings.push(spelling);
         }
-        Ok(spellings)
+        spellings
     }
 
     /// What [`nominal_spellings`](Self::nominal_spellings) cost to read.
-    ///
-    /// # Errors
-    /// Returns [`Error::Unsupported`] if some prime has no accidental.
-    pub fn nominal_costs(&self) -> Result<Vec<Option<i64>>, Error> {
-        Ok(self
-            .nominal_spellings()?
+    pub fn nominal_costs(&self) -> Vec<Option<i64>> {
+        self.nominal_spellings()
             .iter()
             .map(|spelling| spelling.as_deref().map(spelling_cost))
-            .collect())
+            .collect()
     }
 
     /// Whether every prime beyond 3 can be written on the nominal just
@@ -428,25 +424,29 @@ impl Notation {
     ///
     /// # Errors
     /// Returns [`Error::Unsupported`] if some prime has no accidental.
-    pub fn keeps_nominals(&self) -> Result<bool, Error> {
-        Ok(self.nominal_verdict()?.failures == 0)
+    pub fn keeps_nominals(&self) -> bool {
+        self.nominal_verdict().failures == 0
     }
 
     /// [`nominal_costs`](Self::nominal_costs), and how many primes fail
     /// [`keeps_nominals`](Self::keeps_nominals).
-    pub(crate) fn nominal_verdict(&self) -> Result<NominalVerdict, Error> {
-        let costs = self.nominal_costs()?;
-        let nominals = just_nominals(self.subgroup())?;
+    pub(crate) fn nominal_verdict(&self) -> NominalVerdict {
+        let costs = self.nominal_costs();
+        let nominals = just_nominals(self.subgroup());
         let mut failures = 0;
         for ((index, cost), nominal) in (2..self.dim()).zip(&costs).zip(nominals) {
             let mut prime = vec![0i64; self.dim()];
             prime[index] = 1;
-            let best = spelling_cost(&self.spell_interval(&prime)?);
+            let best = spelling_cost(
+                &self
+                    .spell_interval(&prime)
+                    .expect("Prime is a proper interval"),
+            );
             if cost.is_none_or(|cost| cost > best.max(nominal.cost)) {
                 failures += 1;
             }
         }
-        Ok(NominalVerdict { costs, failures })
+        NominalVerdict { costs, failures }
     }
 
     /// Checks that `spelling` has one entry per notation coordinate.
@@ -553,30 +553,32 @@ pub(crate) fn degree(coordinates: &[i64]) -> i64 {
 /// mark. Together with 7 for the octave and 11 for the three, these degrees
 /// are a linear map from interval vectors to degrees, `(7, 11, 16, 20, 24, ..)`,
 /// whose kernel holds the apotome and every derived accidental.
-pub(crate) fn just_nominals(subgroup: &Subgroup) -> Result<Vec<JustNominal>, Error> {
+pub(crate) fn just_nominals(subgroup: &Subgroup) -> Vec<JustNominal> {
     (2..subgroup.dim())
         .map(|index| {
-            let a = derive_accidental_vector(subgroup, index)?;
+            let a = derive_accidental_vector(subgroup, index);
             let s = a[index];
             let spelling = [-s * (a[0] + a[1]), -s * a[1], 1];
-            Ok(JustNominal {
+            JustNominal {
                 degree: degree(&spelling),
                 cost: spelling_cost(&spelling),
-            })
+            }
         })
         .collect()
 }
 
 /// Derives the default accidentals for a subgroup.
-pub fn derive_accidentals(subgroup: &Subgroup) -> Result<Matrix<i64>, Error> {
+pub fn derive_accidentals(subgroup: &Subgroup) -> Matrix<i64> {
     let mut result = Vec::new();
     for index in 2..subgroup.dim() {
-        result.push(derive_accidental_vector(subgroup, index)?);
+        result.push(derive_accidental_vector(subgroup, index));
     }
-    Ok(result)
+    result
 }
 
-/// How far up and down the fifth chain to look for an accidental.
+// How far up and down the fifth chain to look for an accidental.
+// Since we guarantee no augmented/diminshed offsets, this should never be larger than 7.
+// Make it bigger for some slack if we ever try different offsets.
 const MAX_FIFTH_OFFSET: i64 = 12;
 
 /// Chooses the accidental for the prime at `index` of `subgroup`: the smallest
@@ -591,10 +593,7 @@ const MAX_FIFTH_OFFSET: i64 = 12;
 /// # Errors
 /// Returns [`Error::Unsupported`] if no offset within [`MAX_FIFTH_OFFSET`]
 /// gives a small enough interval.
-pub(crate) fn derive_accidental_vector(
-    subgroup: &Subgroup,
-    index: usize,
-) -> Result<Vec<i64>, Error> {
+pub(crate) fn derive_accidental_vector(subgroup: &Subgroup, index: usize) -> Vec<i64> {
     let offsets = std::iter::once(0).chain((1..=MAX_FIFTH_OFFSET).flat_map(|k| [k, -k]));
     for offset in offsets {
         let mut interval = vec![0i64; subgroup.dim()];
@@ -606,13 +605,10 @@ pub(crate) fn derive_accidental_vector(
         interval[0] = -(subgroup.to_cents(&interval) / 1200.0).round_ties_even() as i64;
 
         if subgroup.to_cents(&interval).abs() < MAX_ACCIDENTAL_CENTS {
-            return Ok(subgroup.ascending(&interval));
+            return subgroup.ascending(&interval);
         }
     }
-    Err(Error::Unsupported(format!(
-        "no accidental within {MAX_FIFTH_OFFSET} fifths of {} in {subgroup}",
-        subgroup.basis()[index]
-    )))
+    unreachable!("We should always found an accidental within {MAX_FIFTH_OFFSET} fifths");
 }
 
 /// The middle of the seven naturals, as a fifth coordinate.
@@ -655,17 +651,18 @@ fn spelling_cost_weights(len: usize) -> Vec<i64> {
 /// [`spelling_cost`] is a weighted L1 norm, so this is an exact closest vector
 /// search under it. Ties go to the quadratic form, then to the lattice vector.
 /// `lattice` should be reduced under [`spelling_cost_l2`] for speed.
-fn cheapest(spelling: &[i64], lattice: &Matrix<i64>, count: usize) -> Result<Matrix<i64>, Error> {
+fn cheapest(spelling: &[i64], lattice: &Matrix<i64>, count: usize) -> Matrix<i64> {
     if lattice.is_empty() {
-        return Ok(vec![spelling.to_vec()]);
+        return vec![spelling.to_vec()];
     }
     let mut centred = spelling.to_vec();
     centred[1] -= NOMINAL_CENTRE;
     let weights = spelling_cost_weights(spelling.len());
-    Ok(cvp_l1_top_k(&centred, lattice, &weights, count.max(1))?
+    cvp_l1_top_k(&centred, lattice, &weights, count.max(1))
+        .expect("no overflow occurs for reasonable temperants")
         .iter()
         .map(|enharmonic| subtract(spelling, enharmonic))
-        .collect())
+        .collect()
 }
 
 /// Whether generators with these `images` reach every tempered interval of a
@@ -1236,7 +1233,7 @@ mod tests {
         // The larger notation keeps an accidental for 11 and then does not use
         // it: one sharp is cheaper to read than one mark, and both are on F.
         assert_eq!(note_of(&options[1], 11, 8), "F#5");
-        assert!(options[0].keeps_nominals().unwrap());
+        assert!(options[0].keeps_nominals());
         assert_eq!(
             tempered("2.3.5.11", flattone).generators(),
             options[0].generators()
@@ -1253,11 +1250,11 @@ mod tests {
             ("2.3.5.7", &[(81, 80), (225, 224)][..]),
             ("2.3.5.7.11", &[(81, 80), (126, 125), (99, 98)][..]),
         ] {
-            assert!(!options_of(subgroup, commas)[0].keeps_nominals().unwrap());
+            assert!(!options_of(subgroup, commas)[0].keeps_nominals());
         }
         // Just intonation keeps every nominal, by definition.
         for subgroup in ["2.3", "2.3.5", "2.3.5.7.11", "2.3.5.7.11.13"] {
-            assert!(notation(subgroup).keeps_nominals().unwrap());
+            assert!(notation(subgroup).keeps_nominals());
         }
     }
 
@@ -1265,7 +1262,7 @@ mod tests {
     fn a_temperament_accepts_each_requested_11_limit_prefix() {
         let subgroup: Subgroup = "2.3.5.7.11".parse().unwrap();
         let temperament = Temperament::equal(41, &subgroup).unwrap();
-        let accidentals = derive_accidentals(&subgroup).unwrap();
+        let accidentals = derive_accidentals(&subgroup);
 
         let notations: Vec<Notation> = (1..=accidentals.len())
             .map(|count| Notation::build(&temperament, &accidentals[..count]).unwrap())
@@ -1289,7 +1286,7 @@ mod tests {
         let temperament = Temperament::equal(25, &subgroup).unwrap();
         assert!(Notation::build(&temperament, &[]).is_err());
 
-        let syntonic = derive_accidentals(&subgroup).unwrap()[0].clone();
+        let syntonic = derive_accidentals(&subgroup)[0].clone();
         let notation = Notation::build(&temperament, &[syntonic]).unwrap();
         assert_eq!(notation.len(), 3);
         assert_eq!(note_of(&notation, 5, 4), "vE5");
@@ -1372,14 +1369,14 @@ mod tests {
         // (7, 11, 16, 20, 24, 26): third, seventh, fourth and sixth, as just
         // intonation writes them, one mark each on vE, <Bb, tF and *Ab.
         let subgroup: Subgroup = "2.3.5.7.11.13".parse().unwrap();
-        let nominals = just_nominals(&subgroup).unwrap();
+        let nominals = just_nominals(&subgroup);
         let degrees: Vec<i64> = nominals.iter().map(|n| n.degree).collect();
         let costs: Vec<i64> = nominals.iter().map(|n| n.cost).collect();
         assert_eq!(degrees, vec![16, 20, 24, 26]);
         assert_eq!(costs, vec![11, 15, 13, 19]);
         // Every derived accidental has degree zero under it.
         let map: Vec<i64> = [7, 11].into_iter().chain(degrees).collect();
-        for a in derive_accidentals(&subgroup).unwrap() {
+        for a in derive_accidentals(&subgroup) {
             let dot: i64 = a.iter().zip(&map).map(|(x, d)| x * d).sum();
             assert_eq!(dot, 0);
         }
@@ -1389,19 +1386,19 @@ mod tests {
     fn nominal_costs_look_past_the_cheapest_spelling() {
         // Schismatic's fifth chain puts 5 on F, and nowhere else.
         let options = options_of("2.3.5", &[(32805, 32768)]);
-        assert_eq!(options[0].nominal_costs().unwrap(), vec![None]);
-        assert_eq!(options[1].nominal_costs().unwrap(), vec![Some(11)]);
+        assert_eq!(options[0].nominal_costs(), vec![None]);
+        assert_eq!(options[1].nominal_costs(), vec![Some(11)]);
 
         // Flattone writes 11 as F#, which is on F.
         let options = options_of("2.3.5.11", &[(45, 44), (81, 80)]);
-        assert_eq!(options[0].nominal_costs().unwrap(), vec![Some(4), Some(8)]);
+        assert_eq!(options[0].nominal_costs(), vec![Some(4), Some(8)]);
 
         // 41et's largest notation writes 7/4 as tA, but vBb is there too, at
         // what just intonation spends on it, so the nominals are kept.
         let options = et_options(41, "2.3.5.7.11");
         assert_eq!(note_of(&options[2], 7, 4), ">A5");
-        assert_eq!(options[2].nominal_costs().unwrap()[1], Some(15));
-        assert!(options[2].keeps_nominals().unwrap());
+        assert_eq!(options[2].nominal_costs()[1], Some(15));
+        assert!(options[2].keeps_nominals());
     }
 
     #[test]
@@ -1409,11 +1406,11 @@ mod tests {
         // Semaphore and pele each have a spelling cheaper than the one on the
         // nominal, which the old rule, reading only `spell`, took as a miss.
         let semaphore = options_of("2.3.7", &[(49, 48)]);
-        assert!(semaphore[0].keeps_nominals().unwrap());
+        assert!(semaphore[0].keeps_nominals());
 
         let pele = tempered("2.3.5.7.11", &[(441, 440), (896, 891)]);
         assert_eq!(accidental_ratios(&pele), vec![(81, 80), (33, 32)]);
-        assert!(pele.keeps_nominals().unwrap());
+        assert!(pele.keeps_nominals());
     }
 
     #[test]
@@ -1452,17 +1449,11 @@ mod tests {
         let septimal = subgroup.factorize(49, 48).unwrap();
 
         let n = Notation::with_count_and_accidentals(&t, &[septimal], 1).unwrap();
-        let syntonic = Notation::with_count_and_accidentals(
-            &t,
-            &derive_accidentals(&subgroup).unwrap()[..1],
-            1,
-        )
-        .unwrap();
+        let syntonic =
+            Notation::with_count_and_accidentals(&t, &derive_accidentals(&subgroup)[..1], 1)
+                .unwrap();
         assert_eq!(n.enharmonics(), syntonic.enharmonics());
-        assert_eq!(
-            n.nominal_costs().unwrap(),
-            syntonic.nominal_costs().unwrap()
-        );
+        assert_eq!(n.nominal_costs(), syntonic.nominal_costs());
     }
 
     #[test]
@@ -1490,7 +1481,7 @@ mod tests {
         let t = Temperament::equal(22, &subgroup).unwrap();
         let bare = Notation::build(&t, &[]).unwrap();
 
-        let syntonic = derive_accidentals(&subgroup).unwrap()[0].clone();
+        let syntonic = derive_accidentals(&subgroup)[0].clone();
         let raised = Notation::build(&t, &[syntonic]).unwrap();
 
         assert_eq!(bare.enharmonics().len(), 1);
@@ -1504,7 +1495,7 @@ mod tests {
         for (divisions, subgroup) in [(12, "2.3.5"), (22, "2.3.5.7"), (41, "2.3.5.7.11")] {
             let subgroup: Subgroup = subgroup.parse().unwrap();
             let t = Temperament::equal(divisions, &subgroup).unwrap();
-            let accidentals = derive_accidentals(&subgroup).unwrap();
+            let accidentals = derive_accidentals(&subgroup);
             for count in 0..=accidentals.len() {
                 let Ok(n) = Notation::build(&t, &accidentals[..count]) else {
                     continue;
