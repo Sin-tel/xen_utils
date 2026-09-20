@@ -36,7 +36,7 @@ fn cases() -> Vec<Case> {
             let subgroup: Subgroup = subgroup.parse().unwrap();
             let temperament = Temperament::equal(divisions, &subgroup).unwrap();
             let notation = Notation::from_temperament(&temperament).unwrap();
-            let simplifier = Simplifier::new(&temperament).unwrap();
+            let simplifier = Simplifier::new(&temperament);
             let tempered: Vec<Vec<i64>> = (0..divisions).map(|step| vec![step]).collect();
             let spellings: Vec<Vec<i64>> = tempered
                 .iter()

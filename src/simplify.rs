@@ -22,23 +22,19 @@ pub struct Simplifier {
 
 impl Simplifier {
     /// Builds the simplifier over the temperament.
-    ///
-    /// # Errors
-    /// Returns [`Error::InvalidDimensions`] if the comma lattice cannot be
-    /// computed or reduced.
-    pub fn new(temperament: &Temperament) -> Result<Self, Error> {
-        let lattice = temperament.reduced_comma_basis()?;
+    pub fn new(temperament: &Temperament) -> Self {
+        let lattice = temperament.reduced_comma_basis();
         let primes = temperament
             .subgroup()
             .basis()
             .iter()
             .map(|&p| i64::from(p))
             .collect();
-        Ok(Simplifier {
+        Simplifier {
             temperament: temperament.clone(),
             lattice,
             primes,
-        })
+        }
     }
 
     /// The reduced basis of the comma lattice being searched.
@@ -130,7 +126,7 @@ mod tests {
         let temperament = Temperament::equal(divisions, &subgroup).unwrap();
         let options = Notation::options(&temperament).unwrap();
         let notation = options.last().unwrap().clone();
-        let simplifier = Simplifier::new(&temperament).unwrap();
+        let simplifier = Simplifier::new(&temperament);
         (notation, simplifier)
     }
 
@@ -241,7 +237,7 @@ mod tests {
         let comma = subgroup.factorize(128, 125).unwrap();
         let temperament = Temperament::from_commas(&[comma], &subgroup).unwrap();
         let notation = Notation::from_temperament(&temperament).unwrap();
-        let simplifier = Simplifier::new(&temperament).unwrap();
+        let simplifier = Simplifier::new(&temperament);
         let simplest = simplifier.simplify_interval(&stack(&notation, 6)).unwrap();
         assert_eq!(
             subgroup.to_ratio(&simplest).unwrap(),
@@ -379,7 +375,7 @@ mod tests {
     #[test]
     fn just_intonation_has_nothing_to_simplify() {
         let subgroup: Subgroup = "2.3.5.7".parse().unwrap();
-        let simplifier = Simplifier::new(&Temperament::from_ji(&subgroup).unwrap()).unwrap();
+        let simplifier = Simplifier::new(&Temperament::from_ji(&subgroup).unwrap());
 
         assert!(simplifier.lattice().is_empty());
         let interval = subgroup.factorize(225, 224).unwrap();

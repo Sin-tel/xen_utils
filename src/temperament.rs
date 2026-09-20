@@ -136,24 +136,24 @@ impl Temperament {
     ///
     /// This is whatever basis falls out of the kernel computation and is
     /// usually not musically sensible on its own; see [`Self::reduced_comma_basis`].
-    fn comma_basis(&self) -> Result<Vec<Vec<i64>>, Error> {
-        let columns = kernel_right(&self.mapping)?;
-        Ok(transpose(&columns))
+    fn comma_basis(&self) -> Vec<Vec<i64>> {
+        let columns = kernel_right(&self.mapping).expect("the mapping has a kernel");
+        transpose(&columns)
     }
 
     /// A basis for the comma lattice, reduced via LLL to small, musically sensible commas.
     /// Each returned comma is normalized to be greater than unison.
-    pub fn reduced_comma_basis(&self) -> Result<Vec<Vec<i64>>, Error> {
-        let commas = self.comma_basis()?;
+    pub fn reduced_comma_basis(&self) -> Vec<Vec<i64>> {
+        let commas = self.comma_basis();
         if commas.is_empty() {
-            return Ok(commas);
+            return commas;
         }
         let weights = self.subgroup.weights();
-        let reduced = lll(&commas, 0.99, &weights)?;
-        Ok(reduced
+        let reduced = lll(&commas, 0.99, &weights).unwrap_or(commas);
+        reduced
             .iter()
             .map(|comma| self.subgroup.ascending(comma))
-            .collect())
+            .collect()
     }
 
     /// Applies the mapping to each of `intervals`, one row per interval.
@@ -217,7 +217,6 @@ mod tests {
     /// Lovasz condition fixes that order, so it is part of what is being tested.
     fn comma_ratios(t: &Temperament) -> Vec<(u64, u64)> {
         t.reduced_comma_basis()
-            .unwrap()
             .iter()
             .map(|comma| t.subgroup().to_ratio(comma).unwrap())
             .collect()
@@ -253,7 +252,7 @@ mod tests {
     fn reduced_commas_of_12et() {
         let s = Subgroup::p_limit(5);
         let t = Temperament::equal(12, &s).unwrap();
-        let commas = t.reduced_comma_basis().unwrap();
+        let commas = t.reduced_comma_basis();
         // Rank 1 over a rank 3 group, so the comma lattice has rank 2.
         assert_eq!(commas.len(), 2);
         for comma in &commas {

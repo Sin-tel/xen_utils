@@ -21,7 +21,7 @@ fn main() {
                 continue;
             }
         };
-        let tuning = Tuning::weil_euclidean(&temperament).unwrap();
+        let tuning = Tuning::weil_euclidean(&temperament);
 
         let generators: Vec<String> = tuning
             .generators()

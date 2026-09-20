@@ -35,7 +35,7 @@ notation.pitch(&spelling)?;  // 556.3 cents
 notation.spellings(&temperament.temper(&eleven)?, 3)?;  // ^^F5, vvF#5, vGb5
 
 // What 81/64 is in 41et: the simplest just intervals it stands for.
-let simplifier = Simplifier::new(&temperament)?;
+let simplifier = Simplifier::new(&temperament);
 simplifier.simplifications_interval(&subgroup.parse_ratio("81/64")?, 3)?;  // 14/11, 81/64, 63/50
 ```
 

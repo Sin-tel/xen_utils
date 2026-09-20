@@ -72,7 +72,8 @@ impl Notation {
     /// spellings temper to the same thing and there are no enharmonics.
     ///
     /// # Errors
-    /// Returns [`Error::Unsupported`] if some prime has no accidental.
+    /// Returns [`Error::Unsupported`] if the subgroup needs more accidentals
+    /// than there are symbols.
     pub fn from_ji(subgroup: &Subgroup) -> Result<Self, Error> {
         let accidentals = derive_accidentals(subgroup);
         Notation::build(&Temperament::from_ji(subgroup)?, &accidentals)
@@ -83,8 +84,7 @@ impl Notation {
     /// [keeps every nominal](Self::keeps_nominals).
     ///
     /// # Errors
-    /// Returns [`Error::Unsupported`] if some prime has no accidental, or if no
-    /// notation can be derived at all.
+    /// Returns [`Error::Unsupported`] if no notation can be derived at all.
     pub fn from_temperament(temperament: &Temperament) -> Result<Self, Error> {
         Self::from_temperament_with_accidentals(
             temperament,
@@ -124,8 +124,8 @@ impl Notation {
     /// the best of the size below keeps.
     ///
     /// # Errors
-    /// Returns [`Error::Unsupported`] if some prime has no accidental, or if
-    /// no notation exists at all - an equal temperament whose fifth chain does
+    /// Returns [`Error::Unsupported`] if no notation exists at all - an equal
+    /// temperament whose fifth chain does
     /// not reach every note and which has no accidental worth a single step of
     /// it has none.
     pub fn options(temperament: &Temperament) -> Result<Vec<Self>, Error> {
@@ -169,14 +169,21 @@ impl Notation {
     ///
     /// # Errors
     /// Returns [`Error::InvalidDimensions`] if an accidental is not an interval
-    /// of the temperament's subgroup, and [`Error::Unsupported`] if two
-    /// symbols collide, or if the generators do not reach every tempered
-    /// interval.
+    /// of the temperament's subgroup, and [`Error::Unsupported`] if there are
+    /// more accidentals than symbols, or if the generators do not reach every
+    /// tempered interval.
     pub(crate) fn build(
         temperament: &Temperament,
         accidentals: &[Vec<i64>],
     ) -> Result<Self, Error> {
         let subgroup = temperament.subgroup();
+        if accidentals.len() > ACCIDENTAL_SYMBOLS.len() {
+            return Err(Error::Unsupported(format!(
+                "{subgroup} needs {} accidentals, and there are only {} symbols",
+                accidentals.len(),
+                ACCIDENTAL_SYMBOLS.len()
+            )));
+        }
 
         let mut generators = fifth_chain(subgroup.dim());
         generators.extend(accidentals.to_vec());
@@ -194,12 +201,8 @@ impl Notation {
         let enharmonics = kernel_left(&images).expect("kernel is valid");
         let enharmonics = lll(&enharmonics, LLL_DELTA, &weights).unwrap_or(enharmonics);
 
-        let tuning = Tuning::weil_euclidean(temperament)?;
+        let tuning = Tuning::weil_euclidean(temperament);
         let pitches = generator_pitches(&images, &tuning).expect("pitches are valid");
-
-        if accidentals.len() > ACCIDENTAL_SYMBOLS.len() {
-            return Err(Error::Unsupported("Too many accidentals.".into()));
-        }
 
         let symbols = ACCIDENTAL_SYMBOLS
             .iter()
@@ -339,8 +342,7 @@ impl Notation {
     ///
     /// # Errors
     /// Returns [`Error::InvalidDimensions`] if `tempered` does not have one
-    /// entry per generator of the temperament, and [`Error::Unsupported`] if
-    /// the notation cannot write it.
+    /// entry per generator of the temperament.
     pub fn spellings(&self, tempered: &[i64], count: usize) -> Result<Matrix<i64>, Error> {
         let rank = self.temperament.rank();
         if tempered.len() != rank {
@@ -349,8 +351,10 @@ impl Notation {
                 tempered.len()
             )));
         }
+        // `build` refuses a notation whose generators do not span, so every
+        // tempered interval has a spelling.
         let solution = solve_diophantine(&transpose(&self.images), &column(tempered))
-            .map_err(|_| Error::Unsupported(format!("{tempered:?} cannot be written")))?;
+            .expect("the generators reach every tempered interval");
         Ok(cheapest(&first_column(&solution), &self.enharmonics, count))
     }
 
@@ -421,9 +425,6 @@ impl Notation {
     /// Whether every prime beyond 3 can be written on the nominal just
     /// intonation gives it, at a cost no worse than either just intonation
     /// spends on it or this notation spends on its cheapest spelling of it.
-    ///
-    /// # Errors
-    /// Returns [`Error::Unsupported`] if some prime has no accidental.
     pub fn keeps_nominals(&self) -> bool {
         self.nominal_verdict().failures == 0
     }
@@ -860,6 +861,14 @@ mod tests {
             let ratio = n.subgroup().to_ratio(a).unwrap();
             assert_eq!(ratio, fjs_accidentals[i])
         }
+    }
+
+    #[test]
+    fn a_subgroup_past_the_symbols_is_refused() {
+        // Eleven pairs of symbols, so the 41 limit is the largest that can be
+        // notated: the octave, the fifth and one accidental per prime beyond 3.
+        assert_eq!(Notation::from_ji(&Subgroup::p_limit(41)).unwrap().len(), 13);
+        assert!(Notation::from_ji(&Subgroup::p_limit(43)).is_err());
     }
 
     #[test]

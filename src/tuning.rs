@@ -29,7 +29,7 @@ impl Tuning {
 
     /// Least squares on the tuning map error `gM - J` under the Weil-Euclidean
     /// metric: `(M G M^T) g = M G J`.
-    pub fn weil_euclidean(temperament: &Temperament) -> Result<Self, Error> {
+    pub fn weil_euclidean(temperament: &Temperament) -> Self {
         let subgroup = temperament.subgroup();
         let metric = weil_euclidean(subgroup);
         let just: Vec<f64> = subgroup.log_primes().iter().map(|l| 1200.0 * l).collect();
@@ -55,10 +55,10 @@ impl Tuning {
             .collect();
         let rhs: Vec<f64> = mg.iter().map(|a| dot(a, &just)).collect();
 
-        let generators = solve(normal, rhs).ok_or_else(|| {
-            Error::Unsupported("the normal equations of this temperament are singular".into())
-        })?;
-        Tuning::new(temperament, generators)
+        // The mapping has full row rank and the metric is positive definite,
+        // so the normal equations are too.
+        let generators = solve(normal, rhs).expect("the normal equations are positive definite");
+        Tuning::new(temperament, generators).expect("one generator per rank")
     }
 
     pub fn temperament(&self) -> &Temperament {
@@ -173,7 +173,7 @@ mod tests {
     #[test]
     fn just_intonation_is_just() {
         let s = Subgroup::p_limit(11);
-        let t = Tuning::weil_euclidean(&Temperament::from_ji(&s).unwrap()).unwrap();
+        let t = Tuning::weil_euclidean(&Temperament::from_ji(&s).unwrap());
         for (g, l) in t.generators().iter().zip(s.log_primes()) {
             assert!(close(*g, 1200.0 * l));
         }
@@ -183,7 +183,7 @@ mod tests {
     fn meantone_tempers_out_the_syntonic_comma() {
         let s = Subgroup::p_limit(5);
         let t = Temperament::from_commas(&[vec![-4, 4, -1]], &s).unwrap();
-        let tuning = Tuning::weil_euclidean(&t).unwrap();
+        let tuning = Tuning::weil_euclidean(&t);
         assert!(close(tuning.pitch_interval(&[-4, 4, -1]).unwrap(), 0.0));
         let fifth = tuning.pitch_interval(&[-1, 1, 0]).unwrap();
         assert!(fifth > 695.0 && fifth < 698.0, "{fifth}");

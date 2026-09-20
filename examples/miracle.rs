@@ -14,7 +14,7 @@ fn main() {
     let temperament = Temperament::from_commas(&commas, &subgroup).unwrap();
     let options = Notation::options(&temperament).unwrap();
     let recommended = Notation::from_temperament(&temperament).unwrap();
-    let simplifier = Simplifier::new(&temperament).unwrap();
+    let simplifier = Simplifier::new(&temperament);
 
     println!("miracle over {subgroup}, {} notations", options.len());
     println!("comma lattice, reduced:");

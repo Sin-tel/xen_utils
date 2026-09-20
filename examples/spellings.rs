@@ -11,7 +11,7 @@ fn main() {
         let subgroup: Subgroup = subgroup.parse().unwrap();
         let temperament = Temperament::equal(divisions, &subgroup).unwrap();
         let notation = Notation::from_temperament(&temperament).unwrap();
-        let simplifier = Simplifier::new(&temperament).unwrap();
+        let simplifier = Simplifier::new(&temperament);
 
         println!(
             "\n{divisions}et over {subgroup}, notation of length {}",
