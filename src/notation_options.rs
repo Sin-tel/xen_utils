@@ -81,7 +81,7 @@ impl<'a> NotationOptions<'a> {
                 .iter()
                 .map(|&i| self.accidentals[i].clone())
                 .collect();
-            let notation = Notation::from_accidentals(self.temperament, &kept)?;
+            let notation = Notation::build(self.temperament, &kept)?;
             let score = Score::of(&notation)?;
             if best.as_ref().is_none_or(|(held, _)| score < *held) {
                 best = Some((score, notation));

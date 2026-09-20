@@ -75,7 +75,7 @@ impl Notation {
     /// Returns [`Error::Unsupported`] if some prime has no accidental.
     pub fn from_ji(subgroup: &Subgroup) -> Result<Self, Error> {
         let accidentals = derive_accidentals(subgroup)?;
-        Notation::from_accidentals(&Temperament::from_ji(subgroup)?, &accidentals)
+        Notation::build(&Temperament::from_ji(subgroup)?, &accidentals)
     }
 
     /// Builds the recommended notation of `temperament`: the smallest of
@@ -86,15 +86,18 @@ impl Notation {
     /// Returns [`Error::Unsupported`] if some prime has no accidental, or if no
     /// notation can be derived at all.
     pub fn from_temperament(temperament: &Temperament) -> Result<Self, Error> {
-        Self::from_temperament_with(temperament, &derive_accidentals(temperament.subgroup())?)
+        Self::from_temperament_with_accidentals(
+            temperament,
+            &derive_accidentals(temperament.subgroup())?,
+        )
     }
 
     /// Builds the recommended notation of `temperament` given a set of `accidentals`.
-    pub fn from_temperament_with(
+    pub fn from_temperament_with_accidentals(
         temperament: &Temperament,
         accidentals: &[Vec<i64>],
     ) -> Result<Self, Error> {
-        let options = Notation::options_with(temperament, accidentals)?;
+        let options = Notation::options_with_accidentals(temperament, accidentals)?;
         for option in &options {
             if option.keeps_nominals()? {
                 return Ok(option.clone());
@@ -126,23 +129,32 @@ impl Notation {
     /// not reach every note and which has no accidental worth a single step of
     /// it has none.
     pub fn options(temperament: &Temperament) -> Result<Vec<Self>, Error> {
-        Self::options_with(temperament, &derive_accidentals(temperament.subgroup())?)
+        Self::options_with_accidentals(temperament, &derive_accidentals(temperament.subgroup())?)
     }
 
     /// [`options`](Self::options) over the given `accidentals`.
-    pub fn options_with(
+    pub fn options_with_accidentals(
         temperament: &Temperament,
         accidentals: &[Vec<i64>],
     ) -> Result<Vec<Self>, Error> {
         NotationOptions::new(temperament, accidentals)?.search()
     }
 
-    /// The best notation of `temperament` keeping exactly `count` of
-    /// `accidentals`, ranked as [`options`](Self::options) ranks them.
+    /// The best notation of `temperament` keeping exactly `count` accidentals,
+    /// as ranked by [`options`](Self::options).
     ///
     /// # Errors
     /// Returns [`Error::Unsupported`] if no `count` of them make a notation.
-    pub fn with_count(
+    pub fn with_count(temperament: &Temperament, count: usize) -> Result<Self, Error> {
+        Self::with_count_and_accidentals(
+            temperament,
+            &derive_accidentals(temperament.subgroup())?,
+            count,
+        )
+    }
+
+    /// [`with_count`](Self::with_count) over the given `accidentals`.
+    pub fn with_count_and_accidentals(
         temperament: &Temperament,
         accidentals: &[Vec<i64>],
         count: usize,
@@ -160,7 +172,7 @@ impl Notation {
     /// of the temperament's subgroup, and [`Error::Unsupported`] if two
     /// symbols collide, or if the generators do not reach every tempered
     /// interval.
-    pub(crate) fn from_accidentals(
+    pub(crate) fn build(
         temperament: &Temperament,
         accidentals: &[Vec<i64>],
     ) -> Result<Self, Error> {
@@ -1256,7 +1268,7 @@ mod tests {
         let accidentals = derive_accidentals(&subgroup).unwrap();
 
         let notations: Vec<Notation> = (1..=accidentals.len())
-            .map(|count| Notation::from_accidentals(&temperament, &accidentals[..count]).unwrap())
+            .map(|count| Notation::build(&temperament, &accidentals[..count]).unwrap())
             .collect();
 
         assert_eq!(
@@ -1275,10 +1287,10 @@ mod tests {
     fn an_accidental_list_must_reach_every_pitch() {
         let subgroup: Subgroup = "2.3.5".parse().unwrap();
         let temperament = Temperament::equal(25, &subgroup).unwrap();
-        assert!(Notation::from_accidentals(&temperament, &[]).is_err());
+        assert!(Notation::build(&temperament, &[]).is_err());
 
         let syntonic = derive_accidentals(&subgroup).unwrap()[0].clone();
-        let notation = Notation::from_accidentals(&temperament, &[syntonic]).unwrap();
+        let notation = Notation::build(&temperament, &[syntonic]).unwrap();
         assert_eq!(notation.len(), 3);
         assert_eq!(note_of(&notation, 5, 4), "vE5");
     }
@@ -1425,24 +1437,27 @@ mod tests {
         let commas =
             [(225, 224), (1029, 1024), (385, 384)].map(|(n, d)| subgroup.factorize(n, d).unwrap());
         let miracle = Temperament::from_commas(&commas, &subgroup).unwrap();
-        let accidentals = derive_accidentals(&subgroup).unwrap();
 
         // The fifth chain alone does not reach every tempered interval of miracle.
-        assert!(Notation::with_count(&miracle, &accidentals, 0).is_err());
-        let one = Notation::with_count(&miracle, &accidentals, 1).unwrap();
+        assert!(Notation::with_count(&miracle, 0).is_err());
+        let one = Notation::with_count(&miracle, 1).unwrap();
         assert_eq!(accidental_ratios(&one), vec![(81, 80)]);
-        let three = Notation::with_count(&miracle, &accidentals, 3).unwrap();
+        let three = Notation::with_count(&miracle, 3).unwrap();
         assert_eq!(three.len(), 5);
-        assert!(Notation::with_count(&miracle, &accidentals, 4).is_err());
+        assert!(Notation::with_count(&miracle, 4).is_err());
 
         // Only the images matter: in 41et 49/48 is a step as good as 81/80.
         let subgroup: Subgroup = "2.3.5.7".parse().unwrap();
         let t = Temperament::equal(41, &subgroup).unwrap();
         let septimal = subgroup.factorize(49, 48).unwrap();
 
-        let n = Notation::with_count(&t, &[septimal], 1).unwrap();
-        let syntonic =
-            Notation::with_count(&t, &derive_accidentals(&subgroup).unwrap()[..1], 1).unwrap();
+        let n = Notation::with_count_and_accidentals(&t, &[septimal], 1).unwrap();
+        let syntonic = Notation::with_count_and_accidentals(
+            &t,
+            &derive_accidentals(&subgroup).unwrap()[..1],
+            1,
+        )
+        .unwrap();
         assert_eq!(n.enharmonics(), syntonic.enharmonics());
         assert_eq!(
             n.nominal_costs().unwrap(),
@@ -1458,7 +1473,7 @@ mod tests {
         // it is exactly what leaves C# and Db to differ.
         let subgroup = Subgroup::p_limit(5);
         let t = Temperament::equal(12, &subgroup).unwrap();
-        let n = Notation::from_accidentals(&t, &[]).unwrap();
+        let n = Notation::build(&t, &[]).unwrap();
         assert_eq!(n.enharmonics().len(), 1);
         // Twelve fifths less seven octaves, which is the pythagorean comma.
         assert_eq!(n.enharmonics()[0], vec![-7, 12]);
@@ -1473,10 +1488,10 @@ mod tests {
         // its fifth thirteen, which is the whole of ups and downs in 22et.
         let subgroup: Subgroup = "2.3.5.7".parse().unwrap();
         let t = Temperament::equal(22, &subgroup).unwrap();
-        let bare = Notation::from_accidentals(&t, &[]).unwrap();
+        let bare = Notation::build(&t, &[]).unwrap();
 
         let syntonic = derive_accidentals(&subgroup).unwrap()[0].clone();
-        let raised = Notation::from_accidentals(&t, &[syntonic]).unwrap();
+        let raised = Notation::build(&t, &[syntonic]).unwrap();
 
         assert_eq!(bare.enharmonics().len(), 1);
         assert_eq!(raised.enharmonics().len(), 2);
@@ -1491,7 +1506,7 @@ mod tests {
             let t = Temperament::equal(divisions, &subgroup).unwrap();
             let accidentals = derive_accidentals(&subgroup).unwrap();
             for count in 0..=accidentals.len() {
-                let Ok(n) = Notation::from_accidentals(&t, &accidentals[..count]) else {
+                let Ok(n) = Notation::build(&t, &accidentals[..count]) else {
                     continue;
                 };
                 assert_eq!(n.enharmonics().len(), n.len() - t.rank());
@@ -1511,7 +1526,7 @@ mod tests {
         let subgroup: Subgroup = "2.3.5.7".parse().unwrap();
         let commas = [vec![-4, 4, -1, 0], vec![1, 2, -3, 1]];
         let t = Temperament::from_commas(&commas, &subgroup).unwrap();
-        let n = Notation::from_accidentals(&t, &[]).unwrap();
+        let n = Notation::build(&t, &[]).unwrap();
         assert_eq!(n.len(), t.rank());
         assert!(n.enharmonics().is_empty());
     }
@@ -1548,7 +1563,7 @@ mod tests {
         // But we can supply 25/24 as a custom accidental.
         let custom_acc = subgroup.factorize(25, 24).unwrap();
 
-        let options = Notation::options_with(&temperament, &[custom_acc]).unwrap();
+        let options = Notation::options_with_accidentals(&temperament, &[custom_acc]).unwrap();
         assert_eq!(ranks(&options), vec![3]);
         assert_eq!(note_of(&options[0], 5, 4), "vvE5");
     }
@@ -1563,11 +1578,13 @@ mod tests {
         let acc_50_49 = subgroup.factorize(50, 49).unwrap();
 
         let options_49_48 =
-            Notation::options_with(&temperament, std::slice::from_ref(&acc_49_48)).unwrap();
+            Notation::options_with_accidentals(&temperament, std::slice::from_ref(&acc_49_48))
+                .unwrap();
         assert_eq!(options_49_48.last().unwrap().len(), 3);
 
         let options_50_49 =
-            Notation::options_with(&temperament, std::slice::from_ref(&acc_50_49)).unwrap();
+            Notation::options_with_accidentals(&temperament, std::slice::from_ref(&acc_50_49))
+                .unwrap();
         assert_eq!(options_50_49.last().unwrap().len(), 3);
     }
 }
