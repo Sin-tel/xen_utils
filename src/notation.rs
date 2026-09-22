@@ -247,6 +247,20 @@ impl Notation {
             .sum())
     }
 
+    /// What a spelling costs to read: a sharp is worth two accidental marks, and
+    /// the fifths count from `D`. [`spellings`](Self::spellings) returns the
+    /// cheapest spellings of a tempered interval first, and this compares
+    /// spellings it did not rank against each other, such as the one
+    /// [`nominal_spellings`](Self::nominal_spellings) picks.
+    ///
+    /// # Errors
+    /// Returns [`Error::InvalidDimensions`] if `spelling` does not have one
+    /// entry per notation coordinate.
+    pub fn cost(&self, spelling: &[i64]) -> Result<i64, Error> {
+        self.check(spelling)?;
+        Ok(spelling_cost(spelling))
+    }
+
     /// The notational generators as prime interval vectors, in the order their
     /// notation coordinates count them: the octave, the fifth, then the
     /// accidentals. Every accidental is an ascending interval.
