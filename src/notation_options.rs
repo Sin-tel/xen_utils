@@ -22,14 +22,27 @@ impl<'a> NotationOptions<'a> {
         let vectors: Matrix<i64> = accidentals.to_vec();
         let images = temperament.temper_all(&vectors)?;
         let mut useful: Vec<usize> = Vec::new();
+
+        // sharp
+        let mut apotome = vec![0; temperament.dim()];
+        apotome[0] = -11;
+        apotome[1] = 7;
+        apotome = temperament.temper(&apotome)?;
+
         for index in 0..images.len() {
+            // skip if tempered
             if is_zero(&images[index]) {
                 continue;
             }
+            // skip if it is the same as one we already have
             if useful
                 .iter()
                 .any(|&kept| equal_up_to_sign(&images[kept], &images[index]))
             {
+                continue;
+            }
+            // skip if it maps to a sharp or flat
+            if equal_up_to_sign(&apotome, &images[index]) {
                 continue;
             }
             useful.push(index);
@@ -93,10 +106,8 @@ impl<'a> NotationOptions<'a> {
     /// Whether the accidentals at `keep` make a notation at all.
     ///
     /// They must reach every tempered interval together with the octave and the
-    /// fifth. An
-    /// equal temperament must also keep one worth a single step if it keeps any:
-    /// with no symbol for a single step, single steps can only be reached by
-    /// walking the fifth chain, which is not how anyone writes one.
+    /// fifth. If an equal temperment keeps any accidental, one of them must
+    /// map to a single step.
     fn valid(&self, keep: &[usize]) -> Result<bool, Error> {
         if self.temperament.rank() == 1
             && !keep.is_empty()
@@ -171,6 +182,7 @@ impl Ord for Score {
 }
 
 fn equal_up_to_sign(one: &[i64], other: &[i64]) -> bool {
+    assert_eq!(one.len(), other.len());
     one == other || one.iter().zip(other).all(|(a, b)| *a == -b)
 }
 

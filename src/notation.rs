@@ -1314,22 +1314,13 @@ mod tests {
     }
 
     #[test]
-    fn a_sharp_is_the_same_nominal() {
-        // Flattone writes 11/8 as F#, where just intonation has tF. Seven fifths
-        // leave the letter alone, so that is the same nominal and the smaller
-        // notation is kept rather than taking on an accidental for 11.
+    fn flattone_single_notation() {
+        // Flattone writes 11/8 as F#, where just intonation has tF.
+        // That means # = t, so that notation is skipped.
         let flattone = &[(45, 44), (81, 80)][..];
         let options = options_of("2.3.5.11", flattone);
-        assert_eq!(ranks(&options), vec![2, 3]);
+        assert_eq!(ranks(&options), vec![2]);
         assert_eq!(note_of(&options[0], 11, 8), "F#5");
-        // The larger notation keeps an accidental for 11 and then does not use
-        // it: one sharp is cheaper to read than one mark, and both are on F.
-        assert_eq!(note_of(&options[1], 11, 8), "F#5");
-        assert!(options[0].keeps_nominals());
-        assert_eq!(
-            tempered("2.3.5.11", flattone).generators(),
-            options[0].generators()
-        );
     }
 
     #[test]
